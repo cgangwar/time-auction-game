@@ -8,6 +8,9 @@ import Home from "@/pages/Home";
 import Game from "@/pages/Game";
 import Results from "@/pages/Results";
 import Lobby from "@/pages/Lobby";
+import Games from "@/pages/Games";
+import Leaderboard from "@/pages/Leaderboard";
+import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
 import { AuthProvider } from "./contexts/AuthContext";
 import { GameProvider } from "./contexts/GameContext";
@@ -27,6 +30,9 @@ function Router() {
           <Route path="/game/:id" component={Game} />
           <Route path="/results/:id/:round" component={Results} />
           <Route path="/lobby/:id" component={Lobby} />
+          <Route path="/games" component={Games} />
+          <Route path="/leaderboard" component={Leaderboard} />
+          <Route path="/profile" component={Profile} />
           <Route component={NotFound} />
         </Switch>
       </div>

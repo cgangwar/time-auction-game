@@ -95,7 +95,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
 export type Game = typeof games.$inferSelect;
-export type InsertGame = z.infer<typeof insertGameSchema>;
+export type InsertGame = z.infer<typeof insertGameSchema> & { code?: string };
 
 export type GameParticipant = typeof gameParticipants.$inferSelect;
 export type InsertGameParticipant = z.infer<typeof insertGameParticipantSchema>;

@@ -583,10 +583,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         code = generateCode();
       }
       
-      // Create the game
+      // Create the game with the generated code
       const game = await storage.createGame({
         ...validatedData,
-        code
+        code: code
       });
       
       // Add creator as host
@@ -720,16 +720,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           
           return {
-            ...game,
+            id: game.id,
+            code: game.code,
+            hostId: game.createdById,
             hostName,
             playerCount: participants.length,
-            maxPlayers: 4
+            maxPlayers: 4,
+            status: game.status,
+            isPublic: game.isPublic,
+            createdAt: game.createdAt
           };
         })
       );
       
       res.status(200).json(gamesWithDetails);
     } catch (error) {
+      console.error('Error fetching public games:', error);
       res.status(500).json({ message: 'Internal server error' });
     }
   });
