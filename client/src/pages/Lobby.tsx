@@ -1,33 +1,65 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGame } from "@/contexts/GameContext";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
-import { User } from "@shared/schema";
+import { ClientPlayer } from "@shared/schema";
 
-// Define types for props
-interface LobbyContentProps {
-  gameId: number;
-  user: User;
-  gameState: any;
-  navigate: (to: string) => void;
-  updatePlayerReady: (gameId: number, userId: number, isReady: boolean) => void;
-  handleToggleReady: () => void;
-  handleLeaveLobby: () => void;
-}
-
-// Define a component for the Lobby content
-function LobbyContent({
-  gameId,
-  user,
-  gameState,
-  navigate,
-  updatePlayerReady,
-  handleToggleReady,
-  handleLeaveLobby
-}: LobbyContentProps) {
-  // Regular content rendering logic
+// Lobby component
+function Lobby() {
+  const [, params] = useRoute("/lobby/:id");
+  const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const { connectToGame, gameState, updatePlayerReady, disconnectFromGame } = useGame();
+  
+  const gameId = params?.id ? parseInt(params.id) : undefined;
+  
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    
+    // Connect to the game WebSocket
+    if (gameId && user) {
+      console.log(`Lobby: Connecting to game ${gameId} as user ${user.id}`);
+      connectToGame(gameId, user.id);
+    }
+    
+    // Cleanup when leaving the page
+    return () => {
+      if (gameId) {
+        console.log(`Lobby: Disconnecting from game ${gameId}`);
+        disconnectFromGame();
+      }
+    };
+  }, [gameId, user, navigate, connectToGame, disconnectFromGame]);
+  
+  // Listen for game start event
+  useEffect(() => {
+    if (gameState?.lastEvent?.type === 'GAME_START') {
+      navigate(`/game/${gameId}`);
+    }
+  }, [gameState, gameId, navigate]);
+  
+  // Handle player ready toggle
+  const handleToggleReady = () => {
+    if (!gameId || !user || !gameState) return;
+    
+    const currentPlayer = gameState.players.find((p: ClientPlayer) => p.id === user.id);
+    if (currentPlayer) {
+      updatePlayerReady(gameId, user.id, !currentPlayer.isReady);
+    }
+  };
+  
+  // Handle leave lobby
+  const handleLeaveLobby = () => {
+    disconnectFromGame();
+    navigate("/");
+  };
+  
+  // Loading state
   if (!user || !gameId || !gameState) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -39,14 +71,15 @@ function LobbyContent({
     );
   }
   
-  // Check if current user is the host
-  const currentPlayer = gameState.players.find((p: any) => p.id === user.id);
+  // Get player data
+  const currentPlayer = gameState.players.find((p: ClientPlayer) => p.id === user.id);
   const isHost = currentPlayer?.isHost || false;
   const isReady = currentPlayer?.isReady || false;
   
   // Check if all players are ready
-  const allPlayersReady = gameState.players.length >= 2 && gameState.players.every((p: any) => p.isReady);
-
+  const allPlayersReady = gameState.players.length >= 2 && 
+                          gameState.players.every((p: ClientPlayer) => p.isReady);
+  
   return (
     <div className="h-full flex flex-col">
       {/* Lobby Header */}
@@ -112,7 +145,7 @@ function LobbyContent({
         
         <div className="space-y-3">
           {/* Existing players */}
-          {gameState.players.map((player: any) => (
+          {gameState.players.map((player: ClientPlayer) => (
             <div 
               key={player.id}
               className="bg-white rounded-xl p-4 shadow-sm border border-neutral-light flex items-center"
@@ -200,86 +233,6 @@ function LobbyContent({
         </div>
       )}
     </div>
-  );
-}
-
-// Main Lobby component with hooks
-function Lobby() {
-  const [, params] = useRoute("/lobby/:id");
-  const [, navigate] = useLocation();
-  const { user } = useAuth();
-  const { connectToGame, gameState, updatePlayerReady, disconnectFromGame } = useGame();
-  const { toast } = useToast();
-  
-  const gameId = params?.id ? parseInt(params.id) : undefined;
-  
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
-    
-    // Connect to the game WebSocket
-    if (gameId && user) {
-      console.log(`Lobby: Connecting to game ${gameId} as user ${user.id}`);
-      connectToGame(gameId, user.id);
-    }
-    
-    // Cleanup when leaving the page
-    return () => {
-      if (gameId) {
-        console.log(`Lobby: Disconnecting from game ${gameId}`);
-        disconnectFromGame();
-      }
-    };
-  }, [gameId, user, navigate, connectToGame, disconnectFromGame]);
-  
-  // Listen for game start event
-  useEffect(() => {
-    if (gameState?.lastEvent?.type === 'GAME_START') {
-      navigate(`/game/${gameId}`);
-    }
-  }, [gameState, gameId, navigate]);
-  
-  // Handle player ready toggle
-  const handleToggleReady = () => {
-    if (!gameId || !user || !gameState) return;
-    
-    const currentPlayer = gameState.players.find(p => p.id === user.id);
-    if (currentPlayer) {
-      updatePlayerReady(gameId, user.id, !currentPlayer.isReady);
-    }
-  };
-  
-  // Handle leave lobby
-  const handleLeaveLobby = () => {
-    disconnectFromGame();
-    navigate("/");
-  };
-  
-  // Render the component - only if we have the required data
-  if (!user || !gameId) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <span className="material-icons text-4xl text-neutral animate-spin">refresh</span>
-          <p className="mt-4 text-neutral">Loading lobby...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  return (
-    <LobbyContent 
-      gameId={gameId}
-      user={user}
-      gameState={gameState}
-      navigate={navigate}
-      updatePlayerReady={updatePlayerReady}
-      handleToggleReady={handleToggleReady}
-      handleLeaveLobby={handleLeaveLobby}
-    />
   );
 }
 
