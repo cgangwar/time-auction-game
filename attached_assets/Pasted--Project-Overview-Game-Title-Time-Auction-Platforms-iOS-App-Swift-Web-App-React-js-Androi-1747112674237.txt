@@ -1,0 +1,67 @@
+🎯 Project Overview Game Title: Time Auction
+Platforms: iOS App (Swift), Web App (React.js), Android App (Kotlin) 
+– Android support to be added in Phase 3
+Game Type: Real-time multiplayer strategy game
+Core Mechanics: Time-based bidding system across multiple rounds
+Target Audience: Fans of strategic, psychological games; viewers of The Devil’s Plan
+Phased Implementation Plan We will implement the game in a staged manner to ensure stability and excellent user experience before expanding platforms.
+Phase 1 – Web Integration with Internet
+•	Assume internet is available, enhance iOS and Web app to support cross-platform play
+•	Add Node.js server with WebSocket (Socket.io) support
+•	Introducing lobby matchmaking, game persistence
+•	Add user accounts (basic email/password) and player profile 
+
+Phase 2 – Local Bluetooth Offline Mode (iOS Only)
+•	Implement peer-to-peer local multiplayer using CoreBluetooth
+•	Game Host acts as Game Server; all players join via BLE
+•	All game logic runs on the host device
+•	Bluetooth message protocol includes JOIN, START_ROUND, TIME_BID, WINNER_SYNC
+•	Offline local play mode with minimal UI and no server/backend dependency
+Phase 3 – Android App Support
+•	Build Android app using Kotlin and Jetpack Compose
+•	Integrate with existing backend and real-time architecture
+•	Support BLE and online multiplayer modes
+🧩 Game Mechanics Summary Total Rounds: 18 Player Time Bank: Each player starts with 600 seconds (10 minutes) Round Play:
+•	Players decide how long to press a buzzer within each round
+•	The player who holds the buzzer the longest wins the round and earns a victory token
+•	Time held is deducted from the player's remaining time bank Elimination: After 18 rounds, the player with the fewest victory tokens is eliminated
+•	Players can’t see each other’s remaining time, they only see the common clock running until final winning player lifts their hand off the buzzer.
+🧱 Technical Architecture Frontend
+•	Server Framework: Node.js with Express.js
+•	Real-Time Communication: Socket.io
+•	Database: MongoDB Atlas
+•	iOS App: Swift and SwiftUI for native performance
+•	Web App: React.js with responsive design
+•	Android App (Phase 3): Kotlin and Jetpack Compose
+Cross-Platform Considerations
+•	API Design: RESTful APIs with JSON responses
+•	Authentication: Email/password (Phase 1) , OAuth 2.0 (Phase 2)
+•	State Management: Redux for React, equivalents for Swift/Kotlin
+🎨 UX/UI Design Recommendations Design Philosophy
+•	Minimalist Aesthetic: Inspired by Dots and Candy Crush
+•	Intuitive Navigation: Bottom navigation bars
+•	Responsive Design: Adapts to screen sizes
+Key UI Components
+•	Home Screen: Active games, quick start, settings
+•	Game Lobby: Avatars, round count, chat (Phase 2)
+•	Gameplay Screen:
+o	Central buzzer button with timer
+o	Player’s own remaining time bank
+o	Real-time token counter
+•	Post-Game Summary:
+o	Player performance, rounds won, time spent per round, time remaining
+o	Time spent per round
+o	Other player’s performance rounds won, time spent per round, time remaining
+o	Micro-Interactions
+•	Haptic feedback on interactions
+•	Color changes and progress bars for time indication
+🔐 Security and Fair Play
+•	End-to-end encryption and secure data storage
+•	Anti-cheat systems monitoring for anomalies
+•	In-app player reporting system
+📈 Future Enhancements
+•	Android App Development (Phase 3)
+•	Social Features: Friends, messaging, leaderboards
+•	Customization: Avatars, buzzer sounds
+•	Analytics: User engagement tracking and feedback
+
