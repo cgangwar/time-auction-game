@@ -61,13 +61,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Handle game-related messages (all require authentication)
         if (data.type === 'JOIN_GAME' && data.gameId && userId) {
+          console.log(`User ${userId} is joining game ${data.gameId}`);
           handleJoinGame(data.gameId, userId, ws);
         } else if (data.type === 'PLAYER_READY' && data.gameId && userId) {
+          console.log(`User ${userId} toggled ready state to ${data.isReady} in game ${data.gameId}`);
           handlePlayerReady(data.gameId, userId, data.isReady);
         } else if (data.type === 'BUZZER_HOLD' && data.gameId && userId) {
+          console.log(`User ${userId} is holding buzzer in game ${data.gameId}`);
           handleBuzzerHold(data.gameId, userId);
         } else if (data.type === 'BUZZER_RELEASE' && data.gameId && userId && typeof data.holdTime === 'number') {
+          console.log(`User ${userId} released buzzer after ${data.holdTime}ms in game ${data.gameId}`);
           handleBuzzerRelease(data.gameId, userId, data.holdTime);
+        } else {
+          console.log('Received unhandled or invalid WebSocket message:', data);
+          ws.send(JSON.stringify({ 
+            type: 'ERROR', 
+            message: 'Invalid or incomplete message'
+          }));
         }
         
       } catch (error) {
@@ -174,13 +184,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       })
     );
     
+    // Build player list with all required information for the client
+    const clientPlayers = participants.map(p => {
+      const user = playerDetails.find(pd => pd.userId === p.userId);
+      return {
+        id: p.userId,
+        username: user?.username || '',
+        displayName: user?.displayName || '',
+        initials: user?.displayName ? user.displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase() : '??',
+        isHost: p.isHost,
+        isReady: p.isReady,
+        timeBank: p.timeBank || game.startingTimeBank,
+        tokensWon: p.tokensWon,
+        isEliminated: p.isEliminated,
+        isBot: p.isBot || false,
+        botProfile: p.botProfile
+      };
+    });
+
+    console.log('Sending game state to player:', { gameId, playerId: userId, playerCount: clientPlayers.length });
+    
     socket.send(JSON.stringify({
       type: 'GAME_STATE',
       gameId,
+      code: game.code,
       status: game.status,
       currentRound: game.currentRound,
       totalRounds: game.totalRounds,
-      players: playerDetails
+      startingTimeBank: game.startingTimeBank,
+      isPublic: game.isPublic,
+      players: clientPlayers,
+      hasBots: game.hasBots,
+      botCount: game.botCount,
+      botProfiles: game.botProfiles
     }));
   }
   

@@ -43,18 +43,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     
+    console.log(`Connecting to WebSocket at ${wsUrl}...`);
     const newSocket = new WebSocket(wsUrl);
     
     newSocket.onopen = () => {
-      console.log('WebSocket connected');
+      console.log('WebSocket connection established successfully');
       
       // Identify the user to the server
+      console.log(`Identifying user ${userId} to server...`);
       newSocket.send(JSON.stringify({ type: 'IDENTIFY', userId }));
       
       // Join the game room
       setTimeout(() => {
         if (newSocket.readyState === WebSocket.OPEN) {
+          console.log(`Joining game ${gameId}...`);
           newSocket.send(JSON.stringify({ type: 'JOIN_GAME', gameId }));
+        } else {
+          console.error('WebSocket not in OPEN state, cannot join game');
+          toast({
+            title: "Connection Error",
+            description: "Unable to join game - please try refreshing the page",
+            variant: "destructive"
+          });
         }
       }, 500); // Small delay to ensure IDENTIFY is processed
     };
@@ -62,15 +72,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     newSocket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('WebSocket message:', data);
+        console.log('WebSocket message received:', data);
         
         if (data.type === 'ERROR') {
+          console.error('Server reported error:', data.message);
           toast({
-            title: "Error",
+            title: "Server Error",
             description: data.message,
             variant: "destructive"
           });
           return;
+        }
+        
+        if (data.type === 'IDENTIFIED') {
+          console.log('User successfully identified with server');
         }
         
         if (data.type === 'GAME_STATE') {
