@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+
 import { ClientGame, ClientPlayer, GameEvent } from '@shared/schema';
 import { useToast } from '@/hooks/use-toast';
 
@@ -30,6 +31,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [reconnectCount, setReconnectCount] = useState(0);
   const { toast } = useToast();
   
   // Initialize WebSocket connection
@@ -251,21 +253,34 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
     };
     
+    // Use a reconnection counter to prevent infinite reconnection loops
+    const [reconnectCount, setReconnectCount] = useState(0);
+    
     newSocket.onclose = (event) => {
       console.log('WebSocket disconnected', event);
       
-      // Auto-reconnect if it wasn't a normal closure
-      if (event.code !== 1000) {
+      // Only attempt to reconnect a limited number of times
+      if (event.code !== 1000 && reconnectCount < 3) {
+        setReconnectCount(prev => prev + 1);
+        
         toast({
           title: "Connection Lost",
-          description: "Connection to game server was lost. Attempting to reconnect...",
+          description: `Connection to game server was lost. Attempt ${reconnectCount + 1}/3...`,
           variant: "destructive"
         });
         
-        // Try to reconnect after a short delay
+        // Try to reconnect after a delay that increases with each attempt
         setTimeout(() => {
           connectToGame(gameId, userId);
-        }, 2000);
+        }, 2000 + (reconnectCount * 1000));
+      } else if (reconnectCount >= 3) {
+        toast({
+          title: "Connection Failed",
+          description: "Unable to connect to the game server after multiple attempts. Please try again later.",
+          variant: "destructive"
+        });
+        // Return to home page
+        window.location.href = "/";
       }
     };
     

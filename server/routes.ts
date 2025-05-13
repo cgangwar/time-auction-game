@@ -120,39 +120,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Helper function to add a client to a game room
   async function handleJoinGame(gameId: number, userId: number, socket: WebSocket) {
-    const game = await storage.getGame(gameId);
+    console.log(`Handling JOIN_GAME for gameId=${gameId}, userId=${userId}`);
     
-    if (!game) {
-      socket.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
-      return;
-    }
-    
-    if (game.status !== 'waiting') {
-      socket.send(JSON.stringify({ type: 'ERROR', message: 'Game already started' }));
-      return;
-    }
-    
-    // Check if user is already a participant
-    let participant = await storage.getParticipant(gameId, userId);
-    
-    if (!participant) {
-      // Add as new participant
-      const user = await storage.getUser(userId);
-      if (!user) {
-        socket.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
+    try {
+      const game = await storage.getGame(gameId);
+      
+      if (!game) {
+        console.log(`Game ${gameId} not found`);
+        socket.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
         return;
       }
       
-      participant = await storage.addParticipant({
-        gameId,
-        userId,
-        isHost: false,
-        isReady: false,
-        timeBank: game.startingTimeBank,
-        tokensWon: 0,
-        isEliminated: false,
-        isBot: false // Human player
-      });
+      if (game.status !== 'waiting') {
+        console.log(`Game ${gameId} has already started`);
+        socket.send(JSON.stringify({ type: 'ERROR', message: 'Game already started' }));
+        return;
+      }
+      
+      // Check if user is already a participant
+      let participant = await storage.getParticipant(gameId, userId);
+      console.log(`Participant check for game ${gameId}, user ${userId}: ${participant ? 'exists' : 'not found'}`);
+      
+      if (!participant) {
+        // Add as new participant
+        const user = await storage.getUser(userId);
+        if (!user) {
+          console.log(`User ${userId} not found`);
+          socket.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
+          return;
+        }
+        
+        console.log(`Adding user ${userId} as participant to game ${gameId}`);
+        participant = await storage.addParticipant({
+          gameId,
+          userId,
+          isHost: false,
+          isReady: false,
+          timeBank: game.startingTimeBank,
+          tokensWon: 0,
+          isEliminated: false,
+          isBot: false // Human player
+        });
+      }
+    } catch (error) {
+      console.error(`Error in handleJoinGame:`, error);
+      socket.send(JSON.stringify({ type: 'ERROR', message: 'Internal server error' }));
     }
     
     // Add to game room
@@ -174,55 +186,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
       displayName: user?.displayName || ''
     });
     
-    // Send game state to the new player
-    const participants = await storage.getParticipantsByGame(gameId);
-    const playerDetails = await Promise.all(
-      participants.map(async (p) => {
-        const u = await storage.getUser(p.userId);
+  // Send game state to connected user
+  const sendGameState = async (gameId: number, userId: number, socket: WebSocket) => {
+    try {
+      const game = await storage.getGame(gameId);
+      if (!game) {
+        console.error(`Game ${gameId} not found when sending game state`);
+        socket.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
+        return;
+      }
+      
+      const participants = await storage.getParticipantsByGame(gameId);
+      console.log(`Found ${participants.length} participants for game ${gameId}`);
+      
+      const playerDetails = await Promise.all(
+        participants.map(async (p) => {
+          const u = await storage.getUser(p.userId);
+          return {
+            userId: p.userId,
+            isHost: p.isHost,
+            isReady: p.isReady,
+            username: u?.username || '',
+            displayName: u?.displayName || ''
+          };
+        })
+      );
+      
+      // Build player list with all required information for the client
+      const clientPlayers = participants.map(p => {
+        const user = playerDetails.find(pd => pd.userId === p.userId);
         return {
-          userId: p.userId,
+          id: p.userId,
+          username: user?.username || '',
+          displayName: user?.displayName || '',
+          initials: user?.displayName ? user.displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase() : '??',
           isHost: p.isHost,
           isReady: p.isReady,
-          username: u?.username || '',
-          displayName: u?.displayName || ''
+          timeBank: p.timeBank || game.startingTimeBank,
+          tokensWon: p.tokensWon,
+          isEliminated: p.isEliminated,
+          isBot: p.isBot || false,
+          botProfile: p.botProfile
         };
-      })
-    );
-    
-    // Build player list with all required information for the client
-    const clientPlayers = participants.map(p => {
-      const user = playerDetails.find(pd => pd.userId === p.userId);
-      return {
-        id: p.userId,
-        username: user?.username || '',
-        displayName: user?.displayName || '',
-        initials: user?.displayName ? user.displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase() : '??',
-        isHost: p.isHost,
-        isReady: p.isReady,
-        timeBank: p.timeBank || game.startingTimeBank,
-        tokensWon: p.tokensWon,
-        isEliminated: p.isEliminated,
-        isBot: p.isBot || false,
-        botProfile: p.botProfile
+      });
+  
+      console.log('Sending game state to player:', { gameId, playerId: userId, playerCount: clientPlayers.length });
+      
+      const gameState = {
+        type: 'GAME_STATE',
+        gameId,
+        code: game.code,
+        status: game.status,
+        currentRound: game.currentRound,
+        totalRounds: game.totalRounds,
+        startingTimeBank: game.startingTimeBank,
+        isPublic: game.isPublic,
+        players: clientPlayers,
+        hasBots: game.hasBots,
+        botCount: game.botCount,
+        botProfiles: game.botProfiles
       };
-    });
-
-    console.log('Sending game state to player:', { gameId, playerId: userId, playerCount: clientPlayers.length });
-    
-    socket.send(JSON.stringify({
-      type: 'GAME_STATE',
-      gameId,
-      code: game.code,
-      status: game.status,
-      currentRound: game.currentRound,
-      totalRounds: game.totalRounds,
-      startingTimeBank: game.startingTimeBank,
-      isPublic: game.isPublic,
-      players: clientPlayers,
-      hasBots: game.hasBots,
-      botCount: game.botCount,
-      botProfiles: game.botProfiles
-    }));
+      
+      socket.send(JSON.stringify(gameState));
+      console.log('Game state sent successfully');
+    } catch (error) {
+      console.error('Error sending game state:', error);
+      socket.send(JSON.stringify({ type: 'ERROR', message: 'Error retrieving game state' }));
+    }
+  };
+  
+  // Now call the function to send game state
+  await sendGameState(gameId, userId, socket);
   }
   
   // Handle player ready state changes
