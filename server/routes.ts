@@ -1,0 +1,738 @@
+import type { Express, Request, Response } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { WebSocketServer, WebSocket } from "ws";
+import { z } from "zod";
+import { 
+  insertUserSchema, 
+  insertGameSchema, 
+  insertGameParticipantSchema,
+  type GameEvent
+} from "@shared/schema";
+import crypto from "crypto";
+
+// Map to track connected WebSocket clients
+type SocketClient = {
+  userId: number;
+  socket: WebSocket;
+};
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  const httpServer = createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  // Track games and their participants
+  const gameClients: Map<number, Map<number, WebSocket>> = new Map();
+  const userSocketMap: Map<number, WebSocket> = new Map();
+  
+  // WebSocket connection handling
+  wss.on('connection', (ws: WebSocket) => {
+    let userIdentified = false;
+    let userId: number | null = null;
+    
+    ws.on('message', async (message: string) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (!userIdentified && data.type === 'IDENTIFY') {
+          // Authenticate user based on userId
+          if (data.userId) {
+            const user = await storage.getUser(data.userId);
+            if (user) {
+              userId = user.id;
+              userIdentified = true;
+              userSocketMap.set(userId, ws);
+              
+              // Send confirmation
+              ws.send(JSON.stringify({ type: 'IDENTIFIED', userId }));
+            } else {
+              ws.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'User ID required' }));
+          }
+          return;
+        }
+        
+        if (!userIdentified) {
+          ws.send(JSON.stringify({ type: 'ERROR', message: 'Not authenticated' }));
+          return;
+        }
+        
+        // Handle game-related messages (all require authentication)
+        if (data.type === 'JOIN_GAME' && data.gameId && userId) {
+          handleJoinGame(data.gameId, userId, ws);
+        } else if (data.type === 'PLAYER_READY' && data.gameId && userId) {
+          handlePlayerReady(data.gameId, userId, data.isReady);
+        } else if (data.type === 'BUZZER_HOLD' && data.gameId && userId) {
+          handleBuzzerHold(data.gameId, userId);
+        } else if (data.type === 'BUZZER_RELEASE' && data.gameId && userId && typeof data.holdTime === 'number') {
+          handleBuzzerRelease(data.gameId, userId, data.holdTime);
+        }
+        
+      } catch (error) {
+        console.error('WebSocket message error:', error);
+        ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid message format' }));
+      }
+    });
+    
+    ws.on('close', () => {
+      if (userId) {
+        userSocketMap.delete(userId);
+        
+        // Remove from all game rooms
+        gameClients.forEach((clients, gameId) => {
+          if (clients.has(userId)) {
+            clients.delete(userId);
+            
+            // Notify other players that this player left
+            broadcastToGame(gameId, {
+              type: 'PLAYER_LEFT',
+              gameId,
+              userId
+            });
+          }
+        });
+      }
+    });
+  });
+  
+  // Helper function to add a client to a game room
+  async function handleJoinGame(gameId: number, userId: number, socket: WebSocket) {
+    const game = await storage.getGame(gameId);
+    
+    if (!game) {
+      socket.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
+      return;
+    }
+    
+    if (game.status !== 'waiting') {
+      socket.send(JSON.stringify({ type: 'ERROR', message: 'Game already started' }));
+      return;
+    }
+    
+    // Check if user is already a participant
+    let participant = await storage.getParticipant(gameId, userId);
+    
+    if (!participant) {
+      // Add as new participant
+      const user = await storage.getUser(userId);
+      if (!user) {
+        socket.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
+        return;
+      }
+      
+      participant = await storage.addParticipant({
+        gameId,
+        userId,
+        isHost: false,
+        isReady: false,
+        timeBank: game.startingTimeBank,
+        tokensWon: 0,
+        isEliminated: false
+      });
+    }
+    
+    // Add to game room
+    if (!gameClients.has(gameId)) {
+      gameClients.set(gameId, new Map());
+    }
+    
+    gameClients.get(gameId)?.set(userId, socket);
+    
+    // Get user details
+    const user = await storage.getUser(userId);
+    
+    // Notify other players that this player joined
+    broadcastToGame(gameId, {
+      type: 'JOIN_GAME',
+      gameId,
+      userId,
+      username: user?.username || '',
+      displayName: user?.displayName || ''
+    });
+    
+    // Send game state to the new player
+    const participants = await storage.getParticipantsByGame(gameId);
+    const playerDetails = await Promise.all(
+      participants.map(async (p) => {
+        const u = await storage.getUser(p.userId);
+        return {
+          userId: p.userId,
+          isHost: p.isHost,
+          isReady: p.isReady,
+          username: u?.username || '',
+          displayName: u?.displayName || ''
+        };
+      })
+    );
+    
+    socket.send(JSON.stringify({
+      type: 'GAME_STATE',
+      gameId,
+      status: game.status,
+      currentRound: game.currentRound,
+      totalRounds: game.totalRounds,
+      players: playerDetails
+    }));
+  }
+  
+  // Handle player ready state changes
+  async function handlePlayerReady(gameId: number, userId: number, isReady: boolean) {
+    await storage.updateParticipantReadyStatus(gameId, userId, isReady);
+    
+    // Broadcast to all players in the game
+    broadcastToGame(gameId, {
+      type: 'PLAYER_READY',
+      gameId,
+      userId,
+      isReady
+    });
+    
+    // Check if all players are ready to start the game
+    const game = await storage.getGame(gameId);
+    const participants = await storage.getParticipantsByGame(gameId);
+    
+    if (game && game.status === 'waiting' && participants.length >= 2) {
+      const allReady = participants.every(p => p.isReady);
+      
+      if (allReady) {
+        // Start game countdown
+        startGameCountdown(gameId);
+      }
+    }
+  }
+  
+  // Handle buzzer hold event
+  async function handleBuzzerHold(gameId: number, userId: number) {
+    const timestamp = Date.now();
+    
+    // Broadcast to all players in the game
+    broadcastToGame(gameId, {
+      type: 'BUZZER_HOLD',
+      gameId,
+      userId,
+      timestamp
+    });
+  }
+  
+  // Handle buzzer release event
+  async function handleBuzzerRelease(gameId: number, userId: number, holdTime: number) {
+    const timestamp = Date.now();
+    
+    // Get the game and current round
+    const game = await storage.getGame(gameId);
+    if (!game || game.status !== 'in_progress') {
+      return;
+    }
+    
+    // Get the participant to update their time bank
+    const participant = await storage.getParticipant(gameId, userId);
+    if (participant && participant.timeBank !== null) {
+      // Convert hold time from ms to seconds for calculation
+      const holdTimeSeconds = holdTime / 1000;
+      const newTimeBank = Math.max(0, participant.timeBank - holdTimeSeconds);
+      
+      // Update participant's time bank
+      await storage.updateParticipantTimeBank(gameId, userId, newTimeBank);
+    }
+    
+    // Broadcast to all players in the game
+    broadcastToGame(gameId, {
+      type: 'BUZZER_RELEASE',
+      gameId,
+      userId,
+      timestamp,
+      holdTime
+    });
+    
+    // Find rounds for this game
+    const rounds = await storage.getGameRounds(gameId);
+    const currentRound = rounds.find(r => r.roundNumber === game.currentRound);
+    
+    if (currentRound) {
+      // Create a bid for this round
+      await storage.createBid({
+        roundId: currentRound.id,
+        userId,
+        bidTime: holdTime
+      });
+      
+      // Check if this is the first release (meaning everyone has released)
+      const participants = await storage.getParticipantsByGame(gameId);
+      const activePlayers = participants.filter(p => !p.isEliminated);
+      
+      // Get all bids for this round
+      const bids = await storage.getBidsByRound(currentRound.id);
+      
+      // If we have a bid from each active player, end the round
+      if (bids.length === activePlayers.length) {
+        await endRound(gameId, currentRound.id);
+      }
+    }
+  }
+  
+  // Start game countdown
+  async function startGameCountdown(gameId: number) {
+    // Start countdown from 3
+    let countdown = 3;
+    
+    // Notify players of countdown
+    const countdownInterval = setInterval(async () => {
+      if (countdown <= 0) {
+        clearInterval(countdownInterval);
+        await startGame(gameId);
+      } else {
+        broadcastToGame(gameId, {
+          type: 'GAME_STARTING',
+          gameId,
+          countdown
+        });
+        countdown--;
+      }
+    }, 1000);
+  }
+  
+  // Start the game
+  async function startGame(gameId: number) {
+    const game = await storage.getGame(gameId);
+    if (!game || game.status !== 'waiting') {
+      return;
+    }
+    
+    // Update game status
+    await storage.updateGameStatus(gameId, 'in_progress');
+    await storage.setGameStartTime(gameId);
+    
+    // Create first round
+    const round = await storage.createRound({
+      gameId,
+      roundNumber: 1,
+      winnerId: null
+    });
+    
+    // Broadcast game start
+    broadcastToGame(gameId, {
+      type: 'GAME_START',
+      gameId
+    });
+    
+    // Start first round
+    broadcastToGame(gameId, {
+      type: 'ROUND_START',
+      gameId,
+      roundNumber: 1
+    });
+  }
+  
+  // End the current round
+  async function endRound(gameId: number, roundId: number) {
+    const round = await storage.getRound(roundId);
+    const game = await storage.getGame(gameId);
+    
+    if (!round || !game) {
+      return;
+    }
+    
+    // Get all bids for this round
+    const bids = await storage.getBidsByRound(roundId);
+    
+    // Find the highest bid
+    let highestBid: { userId: number, bidTime: number } | null = null;
+    
+    for (const bid of bids) {
+      if (!highestBid || bid.bidTime > highestBid.bidTime) {
+        highestBid = { userId: bid.userId, bidTime: bid.bidTime };
+      }
+    }
+    
+    if (highestBid) {
+      // Complete the round with the winner
+      await storage.completeRound(roundId, highestBid.userId);
+      
+      // Update winner's token count
+      const participant = await storage.getParticipant(gameId, highestBid.userId);
+      if (participant) {
+        await storage.updateParticipantTokens(
+          gameId, 
+          highestBid.userId, 
+          participant.tokensWon + 1
+        );
+      }
+      
+      // Check if this was the last round
+      if (round.roundNumber >= game.totalRounds) {
+        // Game is over, determine winner
+        await endGame(gameId);
+      } else {
+        // Prepare for next round
+        const nextRound = round.roundNumber + 1;
+        
+        // Broadcast round end
+        broadcastToGame(gameId, {
+          type: 'ROUND_END',
+          gameId,
+          roundNumber: round.roundNumber,
+          winnerId: highestBid.userId,
+          winnerHoldTime: highestBid.bidTime,
+          nextRound
+        });
+        
+        // Update game current round
+        await storage.updateGameCurrentRound(gameId, nextRound);
+        
+        // Create next round
+        await storage.createRound({
+          gameId,
+          roundNumber: nextRound,
+          winnerId: null
+        });
+        
+        // Start next round after a delay
+        setTimeout(() => {
+          broadcastToGame(gameId, {
+            type: 'ROUND_START',
+            gameId,
+            roundNumber: nextRound
+          });
+        }, 5000); // 5 second delay between rounds
+      }
+    }
+  }
+  
+  // End the game and determine final results
+  async function endGame(gameId: number) {
+    const game = await storage.getGame(gameId);
+    if (!game) {
+      return;
+    }
+    
+    // Mark game as completed
+    await storage.updateGameStatus(gameId, 'completed');
+    await storage.setGameEndTime(gameId);
+    
+    // Get all participants
+    const participants = await storage.getParticipantsByGame(gameId);
+    
+    // Find the player with the lowest number of tokens and eliminate them
+    const lowestTokens = Math.min(...participants.map(p => p.tokensWon));
+    
+    for (const participant of participants) {
+      if (participant.tokensWon === lowestTokens) {
+        await storage.eliminateParticipant(gameId, participant.userId);
+      }
+    }
+    
+    // Prepare rankings
+    const rankings = await Promise.all(
+      participants.map(async (p) => {
+        const user = await storage.getUser(p.userId);
+        return {
+          userId: p.userId,
+          username: user?.username || '',
+          displayName: user?.displayName || '',
+          tokens: p.tokensWon,
+          timeRemaining: p.timeBank || 0
+        };
+      })
+    );
+    
+    // Sort by tokens (desc) and then by time remaining (desc)
+    rankings.sort((a, b) => {
+      if (a.tokens !== b.tokens) {
+        return b.tokens - a.tokens;
+      }
+      return b.timeRemaining - a.timeRemaining;
+    });
+    
+    // Broadcast game end
+    broadcastToGame(gameId, {
+      type: 'GAME_END',
+      gameId,
+      rankings
+    });
+  }
+  
+  // Helper function to broadcast messages to all players in a game
+  function broadcastToGame(gameId: number, message: GameEvent) {
+    const clients = gameClients.get(gameId);
+    if (!clients) return;
+    
+    clients.forEach((socket, userId) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+      }
+    });
+  }
+  
+  // API routes
+  
+  // User registration
+  app.post('/api/register', async (req: Request, res: Response) => {
+    try {
+      const validatedData = insertUserSchema.parse(req.body);
+      
+      // Check if username already exists
+      const existingUser = await storage.getUserByUsername(validatedData.username);
+      if (existingUser) {
+        return res.status(409).json({ message: 'Username already taken' });
+      }
+      
+      // Check if email already exists
+      const existingEmail = await storage.getUserByEmail(validatedData.email);
+      if (existingEmail) {
+        return res.status(409).json({ message: 'Email already registered' });
+      }
+      
+      // Hash password (in a real app you would use bcrypt)
+      const hashedPassword = crypto
+        .createHash('sha256')
+        .update(validatedData.password)
+        .digest('hex');
+      
+      // Create user
+      const user = await storage.createUser({
+        ...validatedData,
+        password: hashedPassword
+      });
+      
+      // Remove password from response
+      const { password, ...userWithoutPassword } = user;
+      
+      res.status(201).json(userWithoutPassword);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: 'Invalid input', errors: error.errors });
+      } else {
+        res.status(500).json({ message: 'Internal server error' });
+      }
+    }
+  });
+  
+  // User login
+  app.post('/api/login', async (req: Request, res: Response) => {
+    try {
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: 'Username and password required' });
+      }
+      
+      // Find user
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      // Hash password and compare
+      const hashedPassword = crypto
+        .createHash('sha256')
+        .update(password)
+        .digest('hex');
+      
+      if (user.password !== hashedPassword) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      // Remove password from response
+      const { password: _, ...userWithoutPassword } = user;
+      
+      res.status(200).json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
+  // Get user profile
+  app.get('/api/users/:id', async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id);
+      
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+      
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      // Remove password from response
+      const { password, ...userWithoutPassword } = user;
+      
+      res.status(200).json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
+  // Create a new game
+  app.post('/api/games', async (req: Request, res: Response) => {
+    try {
+      const validatedData = insertGameSchema.parse(req.body);
+      
+      // Generate a unique 6-character game code
+      const generateCode = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        return Array.from({ length: 6 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+      };
+      
+      let code = generateCode();
+      while (await storage.getGameByCode(code)) {
+        code = generateCode();
+      }
+      
+      // Create the game
+      const game = await storage.createGame({
+        ...validatedData,
+        code
+      });
+      
+      // Add creator as host
+      await storage.addParticipant({
+        gameId: game.id,
+        userId: validatedData.createdById,
+        isHost: true,
+        isReady: false,
+        timeBank: game.startingTimeBank,
+        tokensWon: 0,
+        isEliminated: false
+      });
+      
+      res.status(201).json(game);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: 'Invalid input', errors: error.errors });
+      } else {
+        res.status(500).json({ message: 'Internal server error' });
+      }
+    }
+  });
+  
+  // Get game by ID
+  app.get('/api/games/:id', async (req: Request, res: Response) => {
+    try {
+      const gameId = parseInt(req.params.id);
+      
+      if (isNaN(gameId)) {
+        return res.status(400).json({ message: 'Invalid game ID' });
+      }
+      
+      const game = await storage.getGame(gameId);
+      
+      if (!game) {
+        return res.status(404).json({ message: 'Game not found' });
+      }
+      
+      // Get participants
+      const participants = await storage.getParticipantsByGame(gameId);
+      
+      res.status(200).json({ ...game, participants });
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
+  // Join game by code
+  app.post('/api/games/join', async (req: Request, res: Response) => {
+    try {
+      const { code, userId } = req.body;
+      
+      if (!code || !userId) {
+        return res.status(400).json({ message: 'Game code and user ID required' });
+      }
+      
+      // Find game
+      const game = await storage.getGameByCode(code);
+      
+      if (!game) {
+        return res.status(404).json({ message: 'Game not found' });
+      }
+      
+      if (game.status !== 'waiting') {
+        return res.status(409).json({ message: 'Game already started' });
+      }
+      
+      // Check if user already in game
+      const existingParticipant = await storage.getParticipant(game.id, userId);
+      
+      if (existingParticipant) {
+        return res.status(200).json(game); // Already in game, return game info
+      }
+      
+      // Check if game is full (max 4 players)
+      const participants = await storage.getParticipantsByGame(game.id);
+      
+      if (participants.length >= 4) {
+        return res.status(409).json({ message: 'Game is full' });
+      }
+      
+      // Add user as participant
+      await storage.addParticipant({
+        gameId: game.id,
+        userId,
+        isHost: false,
+        isReady: false,
+        timeBank: game.startingTimeBank,
+        tokensWon: 0,
+        isEliminated: false
+      });
+      
+      res.status(200).json(game);
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
+  // Get active games for user
+  app.get('/api/users/:id/games', async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id);
+      
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID' });
+      }
+      
+      const games = await storage.getActiveGames(userId);
+      
+      res.status(200).json(games);
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
+  // Get public lobbies
+  app.get('/api/games/public', async (req: Request, res: Response) => {
+    try {
+      const publicGames = await storage.getPublicGames();
+      
+      // Get host and participant count for each game
+      const gamesWithDetails = await Promise.all(
+        publicGames.map(async (game) => {
+          const participants = await storage.getParticipantsByGame(game.id);
+          const host = participants.find(p => p.isHost);
+          
+          let hostName = 'Unknown';
+          if (host) {
+            const user = await storage.getUser(host.userId);
+            hostName = user?.displayName || 'Unknown';
+          }
+          
+          return {
+            ...game,
+            hostName,
+            playerCount: participants.length,
+            maxPlayers: 4
+          };
+        })
+      );
+      
+      res.status(200).json(gamesWithDetails);
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
+  return httpServer;
+}
