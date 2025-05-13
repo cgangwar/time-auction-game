@@ -27,6 +27,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // WebSocket connection handling
   wss.on('connection', (ws: WebSocket) => {
+    console.log('New WebSocket connection established');
     let userIdentified = false;
     let userId: number | null = null;
     
@@ -36,6 +37,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         if (!userIdentified && data.type === 'IDENTIFY') {
           // Authenticate user based on userId
+          console.log('Received IDENTIFY message:', data);
           if (data.userId) {
             const user = await storage.getUser(data.userId);
             if (user) {
@@ -44,11 +46,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               userSocketMap.set(userId, ws);
               
               // Send confirmation
+              console.log(`User ${userId} successfully identified`);
               ws.send(JSON.stringify({ type: 'IDENTIFIED', userId }));
             } else {
+              console.log(`User with ID ${data.userId} not found`);
               ws.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
             }
           } else {
+            console.log('IDENTIFY message missing userId');
             ws.send(JSON.stringify({ type: 'ERROR', message: 'User ID required' }));
           }
           return;

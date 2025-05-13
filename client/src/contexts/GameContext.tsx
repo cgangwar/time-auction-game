@@ -251,15 +251,29 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
     };
     
-    newSocket.onclose = () => {
-      console.log('WebSocket disconnected');
+    newSocket.onclose = (event) => {
+      console.log('WebSocket disconnected', event);
+      
+      // Auto-reconnect if it wasn't a normal closure
+      if (event.code !== 1000) {
+        toast({
+          title: "Connection Lost",
+          description: "Connection to game server was lost. Attempting to reconnect...",
+          variant: "destructive"
+        });
+        
+        // Try to reconnect after a short delay
+        setTimeout(() => {
+          connectToGame(gameId, userId);
+        }, 2000);
+      }
     };
     
     newSocket.onerror = (error) => {
       console.error('WebSocket error:', error);
       toast({
         title: "Connection Error",
-        description: "Failed to connect to game server",
+        description: "Failed to connect to game server. Please try refreshing the page.",
         variant: "destructive"
       });
     };
