@@ -112,7 +112,14 @@ export class MemStorage implements IStorage {
   async createGame(insertGame: InsertGame): Promise<Game> {
     const id = this.gameIdCounter++;
     const now = new Date();
-    const game: Game = { ...insertGame, id, createdAt: now, startedAt: null, endedAt: null };
+    const game: Game = { 
+      ...insertGame, 
+      id, 
+      status: "waiting", // Ensure status is explicitly set to waiting
+      createdAt: now, 
+      startedAt: null, 
+      endedAt: null 
+    };
     this.games.set(id, game);
     return game;
   }
