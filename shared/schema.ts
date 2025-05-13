@@ -71,6 +71,7 @@ export const insertGameSchema = createInsertSchema(games).omit({
   createdAt: true,
   startedAt: true,
   endedAt: true,
+  code: true, // We'll generate this server-side
 });
 
 export const insertGameParticipantSchema = createInsertSchema(gameParticipants).omit({
