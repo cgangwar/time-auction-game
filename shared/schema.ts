@@ -26,6 +26,9 @@ export const games = pgTable("games", {
   totalRounds: integer("total_rounds").notNull().default(18),
   startingTimeBank: integer("starting_time_bank").notNull().default(600), // 10 minutes in seconds
   isPublic: boolean("is_public").notNull().default(true),
+  hasBots: boolean("has_bots").notNull().default(false), // Whether this game includes AI bots
+  botCount: integer("bot_count").default(0), // Number of bots if using AI mode
+  botProfiles: text("bot_profiles").array(), // Array of bot profile types
   createdAt: timestamp("created_at").defaultNow().notNull(),
   startedAt: timestamp("started_at"),
   endedAt: timestamp("ended_at"),
@@ -40,6 +43,8 @@ export const gameParticipants = pgTable("game_participants", {
   timeBank: integer("time_bank"), // in seconds
   tokensWon: integer("tokens_won").notNull().default(0),
   isEliminated: boolean("is_eliminated").notNull().default(false),
+  isBot: boolean("is_bot").notNull().default(false), // Whether this participant is an AI bot
+  botProfile: text("bot_profile"), // Type of bot profile if this is a bot
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
 });
 
@@ -72,11 +77,18 @@ export const insertGameSchema = createInsertSchema(games).omit({
   startedAt: true,
   endedAt: true,
   code: true, // We'll generate this server-side
+}).extend({
+  hasBots: z.boolean().optional().default(false),
+  botCount: z.number().int().min(0).max(5).optional().default(0),
+  botProfiles: z.array(z.enum(['aggressive', 'conservative', 'erratic'])).optional()
 });
 
 export const insertGameParticipantSchema = createInsertSchema(gameParticipants).omit({
   id: true,
   joinedAt: true,
+}).extend({
+  isBot: z.boolean().optional().default(false),
+  botProfile: z.enum(['aggressive', 'conservative', 'erratic']).optional()
 });
 
 export const insertGameRoundSchema = createInsertSchema(gameRounds).omit({
@@ -121,6 +133,8 @@ export type GameEvent =
   | { type: "GAME_CANCELLED"; gameId: number; reason: string };
 
 // Client-specific types
+export type BotProfileType = 'aggressive' | 'conservative' | 'erratic';
+
 export type ClientPlayer = {
   id: number;
   username: string;
@@ -131,6 +145,8 @@ export type ClientPlayer = {
   timeBank: number;
   tokensWon: number;
   isEliminated: boolean;
+  isBot?: boolean;
+  botProfile?: BotProfileType;
 };
 
 export type ClientGame = {
@@ -142,6 +158,9 @@ export type ClientGame = {
   totalRounds: number;
   startingTimeBank: number;
   isPublic: boolean;
+  hasBots?: boolean;
+  botCount?: number;
+  botProfiles?: BotProfileType[];
   players: ClientPlayer[];
   createdAt: string;
   startedAt?: string;
