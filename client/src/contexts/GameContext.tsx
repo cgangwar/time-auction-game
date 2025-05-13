@@ -49,6 +49,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     console.log(`Connecting to WebSocket at ${wsUrl}...`);
     const newSocket = new WebSocket(wsUrl);
     
+    // Store the socket reference
+    setSocket(newSocket);
+    
     newSocket.onopen = () => {
       console.log('WebSocket connection established successfully');
       
@@ -344,14 +347,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
   }, [socket]);
   
-  // Cleanup on unmount
+  // Cleanup on unmount - don't reference socket in dependency array
   useEffect(() => {
+    // Grab the current socket for cleanup
     return () => {
-      if (socket) {
-        socket.close();
+      const currentSocket = socket;
+      if (currentSocket) {
+        currentSocket.close();
       }
     };
-  }, [socket]);
+  }, []);
   
   const value = {
     gameState,

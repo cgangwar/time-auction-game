@@ -23,12 +23,14 @@ function Lobby() {
     
     // Connect to the game WebSocket
     if (gameId && user) {
+      console.log(`Lobby: Connecting to game ${gameId} as user ${user.id}`);
       connectToGame(gameId, user.id);
     }
     
     // Cleanup when leaving the page
     return () => {
       if (gameId) {
+        console.log(`Lobby: Disconnecting from game ${gameId}`);
         disconnectFromGame();
       }
     };
