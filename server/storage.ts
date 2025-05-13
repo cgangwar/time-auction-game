@@ -112,15 +112,27 @@ export class MemStorage implements IStorage {
   async createGame(insertGame: InsertGame): Promise<Game> {
     const id = this.gameIdCounter++;
     const now = new Date();
+    
+    // Ensure all required fields have default values
     const game: Game = { 
       ...insertGame, 
-      id, 
-      status: "waiting", // Ensure status is explicitly set to waiting
+      id,
+      code: insertGame.code || '',
+      status: "waiting", 
+      currentRound: insertGame.currentRound || 0,
+      totalRounds: insertGame.totalRounds || 10,
+      startingTimeBank: insertGame.startingTimeBank || 600,
+      isPublic: insertGame.isPublic ?? true,
       createdAt: now, 
       startedAt: null, 
-      endedAt: null 
+      endedAt: null,
+      hasBots: insertGame.hasBots || false,
+      botCount: insertGame.botCount || 0,
+      botProfiles: insertGame.botProfiles || []
     };
+    
     this.games.set(id, game);
+    console.log(`Created new game with ID ${id}, status: ${game.status}`);
     return game;
   }
 

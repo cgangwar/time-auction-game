@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { useLocation } from 'wouter';
 import { ClientGame, ClientPlayer, GameEvent } from '@shared/schema';
 import { useToast } from '@/hooks/use-toast';
 
@@ -33,6 +33,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [reconnectCount, setReconnectCount] = useState(0);
   const { toast } = useToast();
+  const [, navigate] = useLocation(); // Pull navigation once at the component level
   
   // Initialize WebSocket connection
   const connectToGame = useCallback((gameId: number, userId: number) => {
@@ -279,8 +280,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           description: "Unable to connect to the game server after multiple attempts. Please try again later.",
           variant: "destructive"
         });
-        // Return to home page
-        window.location.href = "/";
+        // Return to home page using navigate already defined at component level
+        navigate("/");
       }
     };
     
