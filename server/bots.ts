@@ -214,7 +214,9 @@ export async function addBotsToGame(
         isReady: true, // Bots are always ready
         timeBank: game.startingTimeBank,
         tokensWon: 0,
-        isEliminated: false
+        isEliminated: false,
+        isBot: true, // This is a bot player
+        botProfile: bot.profile // Use the bot's profile
       });
       
       console.log(`Added bot ${bot.displayName} to game ${gameId}`);

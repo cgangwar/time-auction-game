@@ -604,7 +604,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isReady: false,
         timeBank: game.startingTimeBank,
         tokensWon: 0,
-        isEliminated: false
+        isEliminated: false,
+        isBot: false // Human player
       });
       
       res.status(201).json(game);
@@ -683,7 +684,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isReady: false,
         timeBank: game.startingTimeBank,
         tokensWon: 0,
-        isEliminated: false
+        isEliminated: false,
+        isBot: false // Human player
       });
       
       res.status(200).json(game);
