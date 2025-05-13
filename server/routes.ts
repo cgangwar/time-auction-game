@@ -77,20 +77,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
     
     ws.on('close', () => {
-      if (userId) {
+      if (userId !== null && userId !== undefined) {
         userSocketMap.delete(userId);
         
         // Remove from all game rooms
         gameClients.forEach((clients, gameId) => {
-          if (clients.has(userId)) {
-            clients.delete(userId);
+          if (clients.has(userId!)) {
+            clients.delete(userId!);
             
-            // Notify other players that this player left
-            broadcastToGame(gameId, {
-              type: 'PLAYER_LEFT',
-              gameId,
-              userId
-            });
+            // Make sure IDs are valid numbers
+            const safeGameId = typeof gameId === 'number' ? gameId : parseInt(String(gameId));
+            const safeUserId = typeof userId === 'number' ? userId : parseInt(String(userId));
+            
+            if (!isNaN(safeGameId) && !isNaN(safeUserId)) {
+              // Notify other players that this player left
+              broadcastToGame(safeGameId, {
+                type: 'PLAYER_LEFT',
+                gameId: safeGameId,
+                userId: safeUserId
+              });
+            }
           }
         });
       }
@@ -707,36 +713,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const publicGames = await storage.getPublicGames();
       
+      if (!publicGames || publicGames.length === 0) {
+        return res.status(200).json([]);
+      }
+      
       // Get host and participant count for each game
       const gamesWithDetails = await Promise.all(
         publicGames.map(async (game) => {
-          const participants = await storage.getParticipantsByGame(game.id);
-          const host = participants.find(p => p.isHost);
-          
-          let hostName = 'Unknown';
-          if (host) {
-            const user = await storage.getUser(host.userId);
-            hostName = user?.displayName || 'Unknown';
+          try {
+            const participants = await storage.getParticipantsByGame(game.id);
+            const host = participants.find(p => p.isHost);
+            
+            let hostName = 'Unknown';
+            if (host) {
+              const user = await storage.getUser(host.userId);
+              hostName = user?.displayName || 'Unknown';
+            }
+            
+            return {
+              id: game.id,
+              code: game.code,
+              hostId: game.createdById,
+              hostName,
+              playerCount: participants.length,
+              maxPlayers: 4,
+              status: game.status,
+              isPublic: game.isPublic,
+              createdAt: game.createdAt
+            };
+          } catch (err) {
+            console.error(`Error processing game ${game.id}:`, err);
+            return null;
           }
-          
-          return {
-            id: game.id,
-            code: game.code,
-            hostId: game.createdById,
-            hostName,
-            playerCount: participants.length,
-            maxPlayers: 4,
-            status: game.status,
-            isPublic: game.isPublic,
-            createdAt: game.createdAt
-          };
         })
       );
       
-      res.status(200).json(gamesWithDetails);
+      // Filter out any null entries from errors
+      const validGames = gamesWithDetails.filter(game => game !== null);
+      
+      res.status(200).json(validGames);
     } catch (error) {
       console.error('Error fetching public games:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      res.status(200).json([]); // Return empty array instead of error
     }
   });
   
