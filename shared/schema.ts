@@ -87,7 +87,7 @@ export const insertGameParticipantSchema = createInsertSchema(gameParticipants).
   id: true,
   joinedAt: true,
 }).extend({
-  isBot: z.boolean().optional().default(false),
+  isBot: z.boolean().default(false), // Default to human player
   botProfile: z.enum(['aggressive', 'conservative', 'erratic']).optional()
 });
 
