@@ -12,7 +12,6 @@ import { Link } from "wouter";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
-  password: z.string().min(1, "Password is required"),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -20,19 +19,17 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 function LoginForm() {
   const [, navigate] = useLocation();
   const { login, isLoading, error } = useAuth();
-  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
       username: "",
-      password: "",
     },
   });
 
   const onSubmit = async (data: LoginFormValues) => {
     try {
-      await login(data.username, data.password);
+      await login(data.username, "");
       navigate("/");
     } catch (err) {
       // Error handling is already done in AuthContext
@@ -47,7 +44,7 @@ function LoginForm() {
             <span className="material-icons text-white">timer</span>
           </div>
           <CardTitle className="text-xl font-display">Sign in to Time Auction</CardTitle>
-          <CardDescription>Enter your credentials to access your account</CardDescription>
+          <CardDescription>Just enter your username to start playing</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -65,34 +62,7 @@ function LoginForm() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <div className="relative">
-                      <FormControl>
-                        <Input 
-                          type={showPassword ? "text" : "password"} 
-                          placeholder="••••••••" 
-                          {...field} 
-                        />
-                      </FormControl>
-                      <button 
-                        type="button"
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral"
-                        onClick={() => setShowPassword(!showPassword)}
-                      >
-                        <span className="material-icons text-sm">
-                          {showPassword ? "visibility_off" : "visibility"}
-                        </span>
-                      </button>
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+
               {error && (
                 <div className="p-3 text-sm bg-red-50 text-red-600 rounded-md">
                   {error}
