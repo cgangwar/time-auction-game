@@ -10,6 +10,7 @@ import {
   type GameEvent
 } from "@shared/schema";
 import crypto from "crypto";
+import { addBotsToGame, processBotActions } from "./bots";
 
 // Map to track connected WebSocket clients
 type SocketClient = {
@@ -30,11 +31,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log('New WebSocket connection established');
     let userIdentified = false;
     let userId: number | null = null;
+    let gameId: number | null = null;
     
-    // Set ping interval to keep connection alive
+    // Set a simple ping interval to keep connection alive
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
+        try {
+          ws.ping();
+        } catch (err) {
+          console.error('Error sending ping:', err);
+          clearInterval(pingInterval);
+        }
       } else {
         clearInterval(pingInterval);
       }
@@ -44,57 +51,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`WebSocket closed${userId ? ` for user ${userId}` : ''}`);
       clearInterval(pingInterval);
       
-      // Clean up user mapping if this was the most recent socket for this user
+      // Clean up user mapping
       if (userId && userSocketMap.get(userId) === ws) {
         userSocketMap.delete(userId);
       }
+      
+      // Clean up game client mapping
+      if (userId && gameId) {
+        const gameUsers = gameClients.get(gameId);
+        if (gameUsers && gameUsers.get(userId) === ws) {
+          gameUsers.delete(userId);
+          if (gameUsers.size === 0) {
+            gameClients.delete(gameId);
+          }
+          
+          // Notify other players that this player left
+          broadcastToGame(gameId, {
+            type: 'PLAYER_LEFT',
+            gameId,
+            userId
+          });
+        }
+      }
+    });
+    
+    ws.on('error', (error) => {
+      console.error('WebSocket error:', error);
     });
     
     ws.on('message', async (message: string) => {
       try {
         const data = JSON.parse(message);
+        console.log('Received message:', data);
         
+        // Handle identification
         if (data.type === 'IDENTIFY') {
-          // Authenticate user based on userId
-          console.log('Received IDENTIFY message:', data);
-          if (data.userId) {
-            const user = await storage.getUser(data.userId);
-            if (user) {
-              // If user was already identified with a different socket,
-              // close old socket and update mapping
-              if (userIdentified && userId !== data.userId) {
-                console.log(`User ${userId} is now identifying as ${data.userId}`);
-              }
-              
-              userId = user.id;
-              userIdentified = true;
-              
-              // If there's already a socket for this user, close it
-              const existingSocket = userSocketMap.get(userId);
-              if (existingSocket && existingSocket !== ws && existingSocket.readyState === WebSocket.OPEN) {
-                console.log(`Closing previous socket for user ${userId}`);
-                existingSocket.close();
-              }
-              
-              userSocketMap.set(userId, ws);
-              
-              // Send confirmation
-              console.log(`User ${userId} successfully identified`);
-              ws.send(JSON.stringify({ type: 'IDENTIFIED', userId }));
-            } else {
-              console.log(`User with ID ${data.userId} not found`);
-              ws.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
-            }
-          } else {
-            console.log('IDENTIFY message missing userId');
+          if (!data.userId) {
             ws.send(JSON.stringify({ type: 'ERROR', message: 'User ID required' }));
+            return;
           }
+          
+          const user = await storage.getUser(data.userId);
+          if (!user) {
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'User not found' }));
+            return;
+          }
+          
+          // Update user ID
+          userId = user.id;
+          userIdentified = true;
+          
+          // Map this connection to the user
+          userSocketMap.set(userId, ws);
+          
+          // Send confirmation
+          console.log(`User ${userId} successfully identified`);
+          ws.send(JSON.stringify({ type: 'IDENTIFIED', userId }));
           return;
         }
         
-        // Require identification for all other message types
-        if (!userIdentified) {
-          console.log('Received message before user identification');
+        // All other messages require user identification
+        if (!userIdentified || !userId) {
           ws.send(JSON.stringify({ type: 'ERROR', message: 'Please identify first' }));
           return;
         }
@@ -102,16 +119,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Handle game-related messages (all require authentication)
         if (data.type === 'JOIN_GAME' && data.gameId && userId) {
           console.log(`User ${userId} is joining game ${data.gameId}`);
-          handleJoinGame(data.gameId, userId, ws);
+          gameId = data.gameId; // Store gameId in connection state
+          
+          try {
+            await handleJoinGame(data.gameId, userId, ws);
+          } catch (err) {
+            console.error(`Error joining game ${data.gameId}:`, err);
+            ws.send(JSON.stringify({ 
+              type: 'ERROR', 
+              message: 'Failed to join game' 
+            }));
+          }
         } else if (data.type === 'PLAYER_READY' && data.gameId && userId) {
           console.log(`User ${userId} toggled ready state to ${data.isReady} in game ${data.gameId}`);
-          handlePlayerReady(data.gameId, userId, data.isReady);
+          
+          try {
+            await handlePlayerReady(data.gameId, userId, data.isReady);
+          } catch (err) {
+            console.error(`Error updating player ready status:`, err);
+            ws.send(JSON.stringify({ 
+              type: 'ERROR', 
+              message: 'Failed to update ready status'
+            }));
+          }
         } else if (data.type === 'BUZZER_HOLD' && data.gameId && userId) {
           console.log(`User ${userId} is holding buzzer in game ${data.gameId}`);
-          handleBuzzerHold(data.gameId, userId);
+          
+          try {
+            await handleBuzzerHold(data.gameId, userId);
+          } catch (err) {
+            console.error(`Error handling buzzer hold:`, err);
+          }
         } else if (data.type === 'BUZZER_RELEASE' && data.gameId && userId && typeof data.holdTime === 'number') {
           console.log(`User ${userId} released buzzer after ${data.holdTime}ms in game ${data.gameId}`);
-          handleBuzzerRelease(data.gameId, userId, data.holdTime);
+          
+          try {
+            await handleBuzzerRelease(data.gameId, userId, data.holdTime);
+          } catch (err) {
+            console.error(`Error handling buzzer release:`, err);
+          }
         } else {
           console.log('Received unhandled or invalid WebSocket message:', data);
           ws.send(JSON.stringify({ 
@@ -123,32 +169,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error('WebSocket message error:', error);
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid message format' }));
-      }
-    });
-    
-    ws.on('close', () => {
-      if (userId !== null && userId !== undefined) {
-        userSocketMap.delete(userId);
-        
-        // Remove from all game rooms
-        gameClients.forEach((clients, gameId) => {
-          if (clients.has(userId!)) {
-            clients.delete(userId!);
-            
-            // Make sure IDs are valid numbers
-            const safeGameId = typeof gameId === 'number' ? gameId : parseInt(String(gameId));
-            const safeUserId = typeof userId === 'number' ? userId : parseInt(String(userId));
-            
-            if (!isNaN(safeGameId) && !isNaN(safeUserId)) {
-              // Notify other players that this player left
-              broadcastToGame(safeGameId, {
-                type: 'PLAYER_LEFT',
-                gameId: safeGameId,
-                userId: safeUserId
-              });
-            }
-          }
-        });
       }
     });
   });
@@ -200,6 +220,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(`Error in handleJoinGame:`, error);
       socket.send(JSON.stringify({ type: 'ERROR', message: 'Internal server error' }));
+      return;
     }
     
     // Add to game room
@@ -207,7 +228,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       gameClients.set(gameId, new Map());
     }
     
-    gameClients.get(gameId)?.set(userId, socket);
+    const gameUsers = gameClients.get(gameId);
+    if (gameUsers) {
+      gameUsers.set(userId, socket);
+    }
     
     // Get user details
     const user = await storage.getUser(userId);
@@ -221,8 +245,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       displayName: user?.displayName || ''
     });
     
+    // Send game state to connected user
+    await sendGameState(gameId, userId, socket);
+  }
+  
   // Send game state to connected user
-  const sendGameState = async (gameId: number, userId: number, socket: WebSocket) => {
+  async function sendGameState(gameId: number, userId: number, socket: WebSocket) {
     try {
       const game = await storage.getGame(gameId);
       if (!game) {
@@ -288,10 +316,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error sending game state:', error);
       socket.send(JSON.stringify({ type: 'ERROR', message: 'Error retrieving game state' }));
     }
-  };
-  
-  // Now call the function to send game state
-  await sendGameState(gameId, userId, socket);
   }
   
   // Handle player ready state changes
@@ -478,23 +502,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Check if this was the last round
-      if (round.roundNumber >= game.totalRounds) {
-        // Game is over, determine winner
+      const nextRound = round.roundNumber + 1;
+      const isLastRound = nextRound > game.totalRounds;
+      
+      // Broadcast round end
+      broadcastToGame(gameId, {
+        type: 'ROUND_END',
+        gameId,
+        roundNumber: round.roundNumber,
+        winnerId: highestBid.userId,
+        winnerHoldTime: highestBid.bidTime,
+        nextRound: isLastRound ? -1 : nextRound
+      });
+      
+      if (isLastRound) {
+        // This was the last round, end the game
         await endGame(gameId);
       } else {
-        // Prepare for next round
-        const nextRound = round.roundNumber + 1;
-        
-        // Broadcast round end
-        broadcastToGame(gameId, {
-          type: 'ROUND_END',
-          gameId,
-          roundNumber: round.roundNumber,
-          winnerId: highestBid.userId,
-          winnerHoldTime: highestBid.bidTime,
-          nextRound
-        });
-        
         // Update game current round
         await storage.updateGameCurrentRound(gameId, nextRound);
         
@@ -549,45 +573,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
           username: user?.username || '',
           displayName: user?.displayName || '',
           tokens: p.tokensWon,
-          timeRemaining: p.timeBank || 0
+          timeRemaining: p.timeBank
         };
       })
     );
     
-    // Sort by tokens (desc) and then by time remaining (desc)
-    rankings.sort((a, b) => {
-      if (a.tokens !== b.tokens) {
+    // Sort rankings by tokens won (descending) and time remaining (descending)
+    const sortedRankings = rankings.sort((a, b) => {
+      if (b.tokens !== a.tokens) {
         return b.tokens - a.tokens;
       }
-      return b.timeRemaining - a.timeRemaining;
+      return (b.timeRemaining || 0) - (a.timeRemaining || 0);
     });
     
-    // Broadcast game end
+    // Broadcast game end with rankings
     broadcastToGame(gameId, {
       type: 'GAME_END',
       gameId,
-      rankings
+      rankings: sortedRankings
     });
   }
   
-  // Helper function to broadcast messages to all players in a game
+  // Helper to broadcast a message to all clients in a game
   function broadcastToGame(gameId: number, message: GameEvent) {
     const clients = gameClients.get(gameId);
     if (!clients) return;
     
+    const messageStr = JSON.stringify(message);
+    
     clients.forEach((socket, userId) => {
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(message));
+        try {
+          socket.send(messageStr);
+        } catch (error) {
+          console.error(`Error broadcasting to user ${userId}:`, error);
+        }
       }
     });
   }
   
-  // API routes
+  // API Routes
   
   // User registration
   app.post('/api/register', async (req: Request, res: Response) => {
     try {
-      const validatedData = insertUserSchema.parse(req.body);
+      const validatedData = insertUserSchema.parse({
+        ...req.body,
+        // Add default display name if not provided
+        displayName: req.body.displayName || req.body.username
+      });
       
       // Check if username already exists
       const existingUser = await storage.getUserByUsername(validatedData.username);
@@ -660,17 +694,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Get user profile
+  // Get user by ID
   app.get('/api/users/:id', async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.id);
-      
       if (isNaN(userId)) {
         return res.status(400).json({ message: 'Invalid user ID' });
       }
       
       const user = await storage.getUser(userId);
-      
       if (!user) {
         return res.status(404).json({ message: 'User not found' });
       }
@@ -687,58 +719,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create a new game
   app.post('/api/games', async (req: Request, res: Response) => {
     try {
+      // Validate the request body
       const validatedData = insertGameSchema.parse(req.body);
       
-      // Generate a unique 6-character game code
-      const generateCode = () => {
-        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-        return Array.from({ length: 6 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
-      };
+      // Generate a random 6-character code
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       
-      let code = generateCode();
-      while (await storage.getGameByCode(code)) {
-        code = generateCode();
-      }
-      
-      // Create the game with the generated code
+      // Create the game
       const game = await storage.createGame({
         ...validatedData,
-        code: code
+        code,
+        status: 'waiting',
+        currentRound: 0
       });
       
-      // Add creator as host
-      await storage.addParticipant({
+      // Add the creator as the first participant and host
+      const participant = await storage.addParticipant({
         gameId: game.id,
-        userId: validatedData.createdById,
+        userId: validatedData.hostId,
         isHost: true,
         isReady: false,
-        timeBank: game.startingTimeBank,
+        timeBank: validatedData.startingTimeBank,
         tokensWon: 0,
         isEliminated: false,
-        isBot: false // Human player
+        isBot: false
       });
+      
+      // If bots are requested, add them
+      if (validatedData.hasBots && validatedData.botCount && validatedData.botCount > 0) {
+        await addBotsToGame(game.id, validatedData.botCount, validatedData.botProfiles, validatedData.startingTimeBank);
+      }
       
       res.status(201).json(game);
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: 'Invalid input', errors: error.errors });
       } else {
+        console.error('Error creating game:', error);
         res.status(500).json({ message: 'Internal server error' });
       }
     }
   });
   
-  // Get game by ID
+  // Get a game by ID
   app.get('/api/games/:id', async (req: Request, res: Response) => {
     try {
       const gameId = parseInt(req.params.id);
-      
       if (isNaN(gameId)) {
         return res.status(400).json({ message: 'Invalid game ID' });
       }
       
       const game = await storage.getGame(gameId);
-      
       if (!game) {
         return res.status(404).json({ message: 'Game not found' });
       }
@@ -746,47 +777,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get participants
       const participants = await storage.getParticipantsByGame(gameId);
       
-      res.status(200).json({ ...game, participants });
+      // Build player list
+      const players = await Promise.all(
+        participants.map(async (p) => {
+          const user = await storage.getUser(p.userId);
+          return {
+            id: p.userId,
+            username: user?.username || '',
+            displayName: user?.displayName || '',
+            initials: user?.displayName 
+              ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase() 
+              : '',
+            isHost: p.isHost,
+            isReady: p.isReady,
+            timeBank: p.timeBank,
+            tokensWon: p.tokensWon,
+            isEliminated: p.isEliminated,
+            isBot: p.isBot,
+            botProfile: p.botProfile
+          };
+        })
+      );
+      
+      // Return game data with players
+      res.status(200).json({
+        ...game,
+        players
+      });
     } catch (error) {
+      console.error('Error getting game:', error);
       res.status(500).json({ message: 'Internal server error' });
     }
   });
   
-  // Join game by code
+  // Join a game by code
   app.post('/api/games/join', async (req: Request, res: Response) => {
     try {
-      const { code, userId } = req.body;
+      const { userId, code } = req.body;
       
-      if (!code || !userId) {
-        return res.status(400).json({ message: 'Game code and user ID required' });
+      if (!userId || !code) {
+        return res.status(400).json({ message: 'User ID and game code required' });
       }
       
-      // Find game
+      // Find the game
       const game = await storage.getGameByCode(code);
-      
       if (!game) {
         return res.status(404).json({ message: 'Game not found' });
       }
       
+      // Check if game has already started
       if (game.status !== 'waiting') {
-        return res.status(409).json({ message: 'Game already started' });
+        return res.status(400).json({ message: 'Game has already started' });
       }
       
       // Check if user already in game
       const existingParticipant = await storage.getParticipant(game.id, userId);
-      
       if (existingParticipant) {
-        return res.status(200).json(game); // Already in game, return game info
+        return res.status(400).json({ message: 'User already in game' });
       }
       
-      // Check if game is full (max 4 players)
-      const participants = await storage.getParticipantsByGame(game.id);
-      
-      if (participants.length >= 4) {
-        return res.status(409).json({ message: 'Game is full' });
-      }
-      
-      // Add user as participant
+      // Add user to game
       await storage.addParticipant({
         gameId: game.id,
         userId,
@@ -795,81 +845,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timeBank: game.startingTimeBank,
         tokensWon: 0,
         isEliminated: false,
-        isBot: false // Human player
+        isBot: false
       });
       
       res.status(200).json(game);
     } catch (error) {
+      console.error('Error joining game:', error);
       res.status(500).json({ message: 'Internal server error' });
     }
   });
   
-  // Get active games for user
+  // Get active games for a user
   app.get('/api/users/:id/games', async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.id);
-      
       if (isNaN(userId)) {
         return res.status(400).json({ message: 'Invalid user ID' });
       }
       
-      const games = await storage.getActiveGames(userId);
+      const activeGames = await storage.getActiveGames(userId);
       
-      res.status(200).json(games);
+      res.status(200).json(activeGames);
     } catch (error) {
+      console.error('Error getting user games:', error);
       res.status(500).json({ message: 'Internal server error' });
     }
   });
   
-  // Get public lobbies
+  // Get public games
   app.get('/api/games/public', async (req: Request, res: Response) => {
     try {
       const publicGames = await storage.getPublicGames();
       
-      if (!publicGames || publicGames.length === 0) {
-        return res.status(200).json([]);
-      }
-      
-      // Get host and participant count for each game
-      const gamesWithDetails = await Promise.all(
+      const gamesWithParticipants = await Promise.all(
         publicGames.map(async (game) => {
-          try {
-            const participants = await storage.getParticipantsByGame(game.id);
-            const host = participants.find(p => p.isHost);
-            
-            let hostName = 'Unknown';
-            if (host) {
-              const user = await storage.getUser(host.userId);
-              hostName = user?.displayName || 'Unknown';
-            }
-            
-            return {
-              id: game.id,
-              code: game.code,
-              hostId: game.createdById,
-              hostName,
-              playerCount: participants.length,
-              maxPlayers: 4,
-              status: game.status,
-              isPublic: game.isPublic,
-              createdAt: game.createdAt
-            };
-          } catch (err) {
-            console.error(`Error processing game ${game.id}:`, err);
-            return null;
-          }
+          const participants = await storage.getParticipantsByGame(game.id);
+          
+          const players = await Promise.all(
+            participants.map(async (p) => {
+              const user = await storage.getUser(p.userId);
+              return {
+                id: p.userId,
+                username: user?.username || '',
+                displayName: user?.displayName || '',
+                isHost: p.isHost,
+                isBot: p.isBot
+              };
+            })
+          );
+          
+          return {
+            ...game,
+            playerCount: participants.length,
+            players
+          };
         })
       );
       
-      // Filter out any null entries from errors
-      const validGames = gamesWithDetails.filter(game => game !== null);
-      
-      res.status(200).json(validGames);
+      res.status(200).json(gamesWithParticipants);
     } catch (error) {
-      console.error('Error fetching public games:', error);
-      res.status(200).json([]); // Return empty array instead of error
+      console.error('Error getting public games:', error);
+      res.status(500).json({ message: 'Internal server error' });
     }
   });
+  
+  // Setup a timer to process bot actions for in-progress games
+  setInterval(async () => {
+    // Get all games that are in progress and have bots
+    try {
+      const allGames = await storage.getPublicGames();
+      const inProgressGamesWithBots = allGames.filter(g => 
+        g.status === 'in_progress' && g.hasBots
+      );
+      
+      for (const game of inProgressGamesWithBots) {
+        await processBotActions(game.id);
+      }
+    } catch (error) {
+      console.error('Error processing bot actions:', error);
+    }
+  }, 2000); // Check every 2 seconds
   
   return httpServer;
 }
