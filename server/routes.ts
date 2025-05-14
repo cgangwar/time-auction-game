@@ -220,6 +220,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isEliminated: false,
           isBot: false // Human player
         });
+      } else if (isCreator && !participant.isHost) {
+        // If they're the creator but not marked as host yet, update them
+        console.log(`Updating host status for user ${userId} in game ${gameId}`);
+        await storage.updateParticipantHostStatus(gameId, userId, true);
       }
     } catch (error) {
       console.error(`Error in handleJoinGame:`, error);

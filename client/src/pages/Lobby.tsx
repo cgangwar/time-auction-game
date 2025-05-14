@@ -81,9 +81,10 @@ function Lobby() {
   const isHost = currentPlayer?.isHost || false;
   const isReady = currentPlayer?.isReady || false;
   
-  // Check if all players are ready
-  const allPlayersReady = gameState.players.length >= 2 && 
-                          gameState.players.every((p: ClientPlayer) => p.isReady);
+  // Check if all players are ready - filter out any invalid players
+  const validPlayers = gameState.players.filter(p => p.id > 0 && p.username !== '');
+  const allPlayersReady = validPlayers.length >= 2 && 
+                          validPlayers.every((p: ClientPlayer) => p.isReady);
   
   return (
     <div className="h-full flex flex-col">
@@ -149,47 +150,49 @@ function Lobby() {
         </div>
         
         <div className="space-y-3">
-          {/* Existing players */}
-          {gameState.players.map((player: ClientPlayer) => (
-            <div 
-              key={player.id}
-              className="bg-white rounded-xl p-4 shadow-sm border border-neutral-light flex items-center"
-            >
-              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-medium">
-                {player.initials}
+          {/* Existing players - filtered to exclude players with invalid data */}
+          {gameState.players
+            .filter((player: ClientPlayer) => player.id > 0 && player.username !== '')
+            .map((player: ClientPlayer) => (
+              <div 
+                key={player.id}
+                className="bg-white rounded-xl p-4 shadow-sm border border-neutral-light flex items-center"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-medium">
+                  {player.initials}
+                </div>
+                <div className="ml-3 flex-1">
+                  <div className="font-medium text-neutral-dark">{player.displayName}</div>
+                  <div className="text-xs text-neutral mt-0.5">
+                    {player.isHost ? 'Host • ' : ''}{player.isReady ? 'Ready' : 'Not ready'}
+                  </div>
+                </div>
+                {player.id === user.id && !player.isHost ? (
+                  // If this is the current user and not the host, show a checkbox
+                  <div className="flex items-center">
+                    <label className="flex items-center cursor-pointer">
+                      <div className={`w-5 h-5 mr-2 border rounded-sm ${player.isReady ? 'bg-green-500 border-green-600' : 'bg-white border-gray-300'} flex items-center justify-center`}>
+                        {player.isReady && <span className="material-icons text-white text-xs">check</span>}
+                      </div>
+                      <input 
+                        type="checkbox"
+                        className="sr-only"
+                        checked={player.isReady}
+                        onChange={handleToggleReady}
+                      />
+                      <span className="text-sm">{player.isReady ? 'Ready' : 'Ready?'}</span>
+                    </label>
+                  </div>
+                ) : (
+                  // For other players, just show the ready status indicator
+                  <div className={`w-6 h-6 rounded-full ${player.isReady ? 'bg-[#10B981]' : 'bg-neutral-light'} flex items-center justify-center`}>
+                    <span className={`material-icons text-${player.isReady ? 'white' : 'neutral'} text-sm`}>
+                      {player.isReady ? 'check' : 'hourglass_empty'}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="ml-3 flex-1">
-                <div className="font-medium text-neutral-dark">{player.displayName}</div>
-                <div className="text-xs text-neutral mt-0.5">
-                  {player.isHost ? 'Host • ' : ''}{player.isReady ? 'Ready' : 'Not ready'}
-                </div>
-              </div>
-              {player.id === user.id && !player.isHost ? (
-                // If this is the current user and not the host, show a checkbox
-                <div className="flex items-center">
-                  <label className="flex items-center cursor-pointer">
-                    <div className={`w-5 h-5 mr-2 border rounded-sm ${player.isReady ? 'bg-green-500 border-green-600' : 'bg-white border-gray-300'} flex items-center justify-center`}>
-                      {player.isReady && <span className="material-icons text-white text-xs">check</span>}
-                    </div>
-                    <input 
-                      type="checkbox"
-                      className="sr-only"
-                      checked={player.isReady}
-                      onChange={handleToggleReady}
-                    />
-                    <span className="text-sm">{player.isReady ? 'Ready' : 'Ready?'}</span>
-                  </label>
-                </div>
-              ) : (
-                // For other players, just show the ready status indicator
-                <div className={`w-6 h-6 rounded-full ${player.isReady ? 'bg-[#10B981]' : 'bg-neutral-light'} flex items-center justify-center`}>
-                  <span className={`material-icons text-${player.isReady ? 'white' : 'neutral'} text-sm`}>
-                    {player.isReady ? 'check' : 'hourglass_empty'}
-                  </span>
-                </div>
-              )}
-            </div>
-          ))}
+            ))}
           
           {/* Empty slots */}
           {Array.from({ length: Math.min(4 - gameState.players.length, 4) }).map((_, index) => (
@@ -221,11 +224,15 @@ function Lobby() {
               </p>
               <Button 
                 className="w-full py-4"
-                disabled={!allPlayersReady || gameState.players.length < 2}
+                disabled={!allPlayersReady || validPlayers.length < 2}
                 onClick={() => updatePlayerReady(gameId, user.id, true)} // Host sets themselves ready to start the game
               >
                 <span className="material-icons mr-2">play_arrow</span>
-                {allPlayersReady ? 'Start Game' : 'Waiting for players'}
+                {allPlayersReady && validPlayers.length >= 2 
+                  ? 'Start Game' 
+                  : validPlayers.length < 2 
+                    ? 'Need at least 2 players' 
+                    : 'Waiting for players to be ready'}
               </Button>
             </div>
             

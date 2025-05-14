@@ -41,6 +41,7 @@ export interface IStorage {
   getParticipant(gameId: number, userId: number): Promise<GameParticipant | undefined>;
   getParticipantsByGame(gameId: number): Promise<GameParticipant[]>;
   updateParticipantReadyStatus(gameId: number, userId: number, isReady: boolean): Promise<void>;
+  updateParticipantHostStatus(gameId: number, userId: number, isHost: boolean): Promise<void>;
   updateParticipantTimeBank(gameId: number, userId: number, timeBank: number): Promise<void>;
   updateParticipantTokens(gameId: number, userId: number, tokens: number): Promise<void>;
   eliminateParticipant(gameId: number, userId: number): Promise<void>;
@@ -277,6 +278,15 @@ export class MemStorage implements IStorage {
     
     if (participant) {
       this.gameParticipants.set(key, { ...participant, isReady });
+    }
+  }
+  
+  async updateParticipantHostStatus(gameId: number, userId: number, isHost: boolean): Promise<void> {
+    const key = `${gameId}-${userId}`;
+    const participant = this.gameParticipants.get(key);
+    
+    if (participant) {
+      this.gameParticipants.set(key, { ...participant, isHost });
     }
   }
 
