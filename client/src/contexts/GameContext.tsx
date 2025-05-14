@@ -23,6 +23,7 @@ interface GameContextType {
   updatePlayerReady: (gameId: number, userId: number, isReady: boolean) => void;
   buzzerHold: (gameId: number, userId: number) => void;
   buzzerRelease: (gameId: number, userId: number, holdTime: number) => void;
+  error: string | null;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -30,6 +31,7 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const sessionGameId = useRef<number | null>(null);
   const sessionUserId = useRef<number | null>(null);

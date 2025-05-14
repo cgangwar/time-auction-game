@@ -8,6 +8,7 @@ import Buzzer from "@/components/Buzzer";
 import PlayerTokens from "@/components/PlayerTokens";
 import GameStartingOverlay from "@/components/GameStartingOverlay";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 function Game() {
   const [, params] = useRoute("/game/:id");
@@ -29,7 +30,17 @@ function Game() {
   const [buzzerStartTime, setBuzzerStartTime] = useState<number | null>(null);
   const [buzzerHoldTime, setBuzzerHoldTime] = useState(0);
   const [commonTime, setCommonTime] = useState("00:00.0");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const animationRef = useRef<number | null>(null);
+  
+  // Fetch game details to check if it exists and what state it's in
+  const { data: gameInfo } = useQuery({
+    queryKey: [`/api/games/${gameId}`],
+    enabled: !!gameId,
+    retry: false,
+    refetchOnWindowFocus: false
+  });
   
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -40,7 +51,21 @@ function Game() {
     
     // Connect to the game WebSocket
     if (gameId && user) {
+      setLoading(true);
+      setError(null);
       connectToGame(gameId, user.id);
+      
+      // Set a timeout to check if we've received game state
+      const timeoutId = setTimeout(() => {
+        if (!gameState) {
+          setError("Could not connect to game. The game may have already started.");
+          setLoading(false);
+        }
+      }, 5000);
+      
+      return () => {
+        clearTimeout(timeoutId);
+      };
     }
     
     // Cleanup when leaving the page
@@ -50,6 +75,14 @@ function Game() {
       }
     };
   }, [gameId, user, navigate, connectToGame, disconnectFromGame]);
+  
+  // Reset loading state when game state is received
+  useEffect(() => {
+    if (gameState) {
+      setLoading(false);
+      setError(null);
+    }
+  }, [gameState]);
   
   // Handle buzzer hold event
   const handleBuzzerDown = useCallback(() => {
@@ -130,12 +163,59 @@ function Game() {
   const timeBank = currentPlayer?.timeBank || 0;
   const timeBankPercentage = gameState ? (timeBank / gameState.startingTimeBank) * 100 : 0;
   
-  if (!user || !gameId || !gameState) {
+  if (!user || !gameId) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
           <span className="material-icons text-4xl text-neutral animate-spin">refresh</span>
-          <p className="mt-4 text-neutral">Loading game...</p>
+          <p className="mt-4 text-neutral">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Display loading state or error message
+  if (loading && !gameState) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <span className="material-icons text-4xl text-neutral animate-spin">refresh</span>
+          <p className="mt-4 text-neutral">Connecting to game...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (error) {
+    return (
+      <>
+        <AppHeader />
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md text-center">
+            <span className="material-icons text-4xl text-red-500 mb-2">error_outline</span>
+            <h3 className="font-bold text-lg text-red-700 mb-2">Unable to Join Game</h3>
+            <p className="text-red-600 mb-4">{error}</p>
+            <p className="text-neutral mb-4">
+              The game may have already started. Please go back to the home page and try joining another game or creating a new one.
+            </p>
+            <button
+              onClick={() => navigate("/")}
+              className="bg-primary hover:bg-primary-dark text-white font-bold py-2 px-4 rounded"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+  
+  if (!gameState) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <span className="material-icons text-4xl text-neutral animate-spin">refresh</span>
+          <p className="mt-4 text-neutral">Loading game data...</p>
         </div>
       </div>
     );
