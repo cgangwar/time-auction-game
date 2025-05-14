@@ -285,8 +285,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     sessionGameId.current = gameId;
     sessionUserId.current = userId;
     
-    // Connect to WebSocket if not already connected
-    if (!gameSocket.isConnected()) {
+    // Always close and reconnect for consistency
+    if (gameSocket.isConnected()) {
+      console.log('WebSocket already connected, closing before reconnecting...');
+      // Don't disconnect, just re-identify and join
+      gameSocket.send({ type: 'IDENTIFY', userId });
+      gameSocket.joinGame(gameId, userId);
+    } else {
+      console.log('WebSocket not connected, establishing new connection...');
       gameSocket.connect(userId)
         .then(() => {
           console.log('WebSocket connected, joining game...');
@@ -294,17 +300,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         })
         .catch(error => {
           console.error('Failed to connect to WebSocket:', error);
+          setError('Could not establish a connection to the game server. Please try again later.');
           toast({
             title: 'Connection Error',
             description: 'Could not establish a connection to the game server.',
             variant: 'destructive'
           });
         });
-    } else {
-      // Already connected, just join the game
-      gameSocket.joinGame(gameId, userId);
     }
-  }, [toast]);
+  }, [toast, setError]);
   
   // Disconnect from game
   const disconnectFromGame = useCallback(() => {

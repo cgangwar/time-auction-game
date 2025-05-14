@@ -186,10 +186,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
       
+      // Allow rejoining games that are in progress for existing participants
       if (game.status !== 'waiting') {
-        console.log(`Game ${gameId} has already started`);
-        socket.send(JSON.stringify({ type: 'ERROR', message: 'Game already started' }));
-        return;
+        console.log(`Game ${gameId} status: ${game.status}`);
+        
+        // Check if the user is already a participant in this game
+        const existingParticipant = await storage.getParticipant(gameId, userId);
+        
+        if (!existingParticipant) {
+          // If not a participant, reject the join attempt
+          console.log(`Game ${gameId} has already started and user ${userId} is not a participant`);
+          socket.send(JSON.stringify({ type: 'ERROR', message: 'Game already started' }));
+          return;
+        } else {
+          console.log(`User ${userId} is rejoining game ${gameId} that is in progress`);
+          // Continue and let them rejoin
+        }
       }
       
       // Check if user is already a participant
@@ -266,6 +278,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         socket.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
         return;
       }
+      
+      console.log(`Sending game state to player: { gameId: ${gameId}, playerId: ${userId}, gameStatus: ${game.status} }`);
       
       const participants = await storage.getParticipantsByGame(gameId);
       console.log(`Found ${participants.length} participants for game ${gameId}`);

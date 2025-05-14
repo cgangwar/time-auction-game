@@ -52,13 +52,17 @@ function Game() {
     
     // Connect to the game WebSocket
     if (gameId && user) {
+      console.log(`Game page: Connecting to game ${gameId} as user ${user.id}`);
       setLoading(true);
       setError(null);
+      
+      // Connect to the game
       connectToGame(gameId, user.id);
       
       // Set a timeout to check if we've received game state
       const timeoutId = setTimeout(() => {
         if (!gameState && !contextError) {
+          console.log('Game connection timeout - no game state received');
           setError("Could not connect to game. The connection timed out or the game may have already started.");
           setLoading(false);
         }
@@ -67,12 +71,14 @@ function Game() {
       // Cleanup function
       return () => {
         clearTimeout(timeoutId);
-        disconnectFromGame();
+        // We don't want to disconnect from the game when this component unmounts
+        // as that could interrupt the WebSocket connection
+        // disconnectFromGame();
       };
     }
     
     return undefined;
-  }, [gameId, user, gameState, contextError, navigate, connectToGame, disconnectFromGame]);
+  }, [gameId, user, navigate, connectToGame]);
   
   // Reset loading state when game state is received or handle errors
   useEffect(() => {
@@ -191,11 +197,13 @@ function Game() {
     let errorTitle = "Unable to Join Game";
     let errorMessage = error;
     let errorSubtext = "Please go back to the home page and try joining another game or creating a new one.";
+    let isGameAlreadyStarted = false;
     
     // Customize error message based on content
     if (error.includes("already started")) {
       errorTitle = "Game Already Started";
       errorSubtext = "This game has already begun and cannot be joined. Please join a different game or create a new one.";
+      isGameAlreadyStarted = true;
     } else if (error.includes("not found")) {
       errorTitle = "Game Not Found";
       errorSubtext = "This game may have been deleted or never existed. Please check the game code and try again.";
@@ -214,12 +222,22 @@ function Game() {
             <p className="text-red-600 mb-4">{errorMessage}</p>
             <p className="text-neutral mb-4">{errorSubtext}</p>
             <div className="flex justify-center space-x-3">
-              <button
-                onClick={() => window.location.reload()}
-                className="bg-neutral hover:bg-neutral-dark text-white font-bold py-2 px-4 rounded"
-              >
-                Retry
-              </button>
+              {!isGameAlreadyStarted && (
+                <button
+                  onClick={() => {
+                    console.log("Manually retrying game connection...");
+                    setError(null);
+                    setLoading(true);
+                    if (gameId && user) {
+                      // Try to reconnect
+                      connectToGame(gameId, user.id);
+                    }
+                  }}
+                  className="bg-neutral hover:bg-neutral-dark text-white font-bold py-2 px-4 rounded"
+                >
+                  Retry
+                </button>
+              )}
               <button
                 onClick={() => navigate("/")}
                 className="bg-primary hover:bg-primary-dark text-white font-bold py-2 px-4 rounded"
