@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGame } from "@/contexts/GameContext";
@@ -14,6 +14,9 @@ function Lobby() {
   
   const gameId = params?.id ? parseInt(params.id) : undefined;
   
+  // Use a ref to track if we've connected already
+  const hasConnectedRef = useRef(false);
+  
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!user) {
@@ -21,10 +24,11 @@ function Lobby() {
       return;
     }
     
-    // Connect to the game WebSocket
-    if (gameId && user) {
+    // Connect to the game WebSocket only once
+    if (gameId && user && !hasConnectedRef.current) {
       console.log(`Lobby: Connecting to game ${gameId} as user ${user.id}`);
       connectToGame(gameId, user.id);
+      hasConnectedRef.current = true;
     }
     
     // Cleanup when leaving the page
@@ -32,6 +36,7 @@ function Lobby() {
       if (gameId) {
         console.log(`Lobby: Disconnecting from game ${gameId}`);
         disconnectFromGame();
+        hasConnectedRef.current = false;
       }
     };
   }, [gameId, user, navigate, connectToGame, disconnectFromGame]);

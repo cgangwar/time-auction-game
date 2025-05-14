@@ -31,18 +31,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let userIdentified = false;
     let userId: number | null = null;
     
+    // Set ping interval to keep connection alive
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+      } else {
+        clearInterval(pingInterval);
+      }
+    }, 30000); // ping every 30 seconds
+    
+    ws.on('close', () => {
+      console.log(`WebSocket closed${userId ? ` for user ${userId}` : ''}`);
+      clearInterval(pingInterval);
+      
+      // Clean up user mapping if this was the most recent socket for this user
+      if (userId && userSocketMap.get(userId) === ws) {
+        userSocketMap.delete(userId);
+      }
+    });
+    
     ws.on('message', async (message: string) => {
       try {
         const data = JSON.parse(message);
         
-        if (!userIdentified && data.type === 'IDENTIFY') {
+        if (data.type === 'IDENTIFY') {
           // Authenticate user based on userId
           console.log('Received IDENTIFY message:', data);
           if (data.userId) {
             const user = await storage.getUser(data.userId);
             if (user) {
+              // If user was already identified with a different socket,
+              // close old socket and update mapping
+              if (userIdentified && userId !== data.userId) {
+                console.log(`User ${userId} is now identifying as ${data.userId}`);
+              }
+              
               userId = user.id;
               userIdentified = true;
+              
+              // If there's already a socket for this user, close it
+              const existingSocket = userSocketMap.get(userId);
+              if (existingSocket && existingSocket !== ws && existingSocket.readyState === WebSocket.OPEN) {
+                console.log(`Closing previous socket for user ${userId}`);
+                existingSocket.close();
+              }
+              
               userSocketMap.set(userId, ws);
               
               // Send confirmation
@@ -59,8 +92,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
         
+        // Require identification for all other message types
         if (!userIdentified) {
-          ws.send(JSON.stringify({ type: 'ERROR', message: 'Not authenticated' }));
+          console.log('Received message before user identification');
+          ws.send(JSON.stringify({ type: 'ERROR', message: 'Please identify first' }));
           return;
         }
         

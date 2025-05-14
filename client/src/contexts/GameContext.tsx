@@ -35,7 +35,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   
   // Initialize WebSocket connection
   const connectToGame = useCallback((gameId: number, userId: number) => {
-    // Close existing socket if there is one
+    // If there's already an active socket connection, don't create a new one
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      console.log('Already connected to WebSocket, reusing existing connection');
+      
+      // Directly join the game with the existing connection
+      socket.send(JSON.stringify({ type: 'JOIN_GAME', gameId, userId }));
+      return;
+    }
+    
+    // Close existing socket if there is one but it's not in OPEN state
     if (socket) {
       socket.close();
       setSocket(null);
