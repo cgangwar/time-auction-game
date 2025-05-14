@@ -754,12 +754,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentRound: 0
       });
       
-      // Add the creator as the first participant and host
+      // Add the creator as the first participant and host - set them as ready by default
       const participant = await storage.addParticipant({
         gameId: game.id,
         userId: validatedData.createdById, // Use createdById instead of hostId
         isHost: true,
-        isReady: false,
+        isReady: true, // Host is ready by default to streamline gameplay
         timeBank: validatedData.startingTimeBank,
         tokensWon: 0,
         isEliminated: false,

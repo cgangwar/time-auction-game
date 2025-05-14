@@ -58,6 +58,19 @@ function Lobby() {
     }
   };
   
+  // Handle start game (for host)
+  const handleStartGame = () => {
+    if (!gameId || !user || !gameState) return;
+    
+    // The host is already marked as ready by default
+    // We are showing this button only to the host and only when conditions are met
+    if (allPlayersReady && validPlayers.length >= 2) {
+      console.log('Host starting the game...');
+      // This will push a message to start game
+      updatePlayerReady(gameId, user.id, true);
+    }
+  };
+  
   // Handle leave lobby
   const handleLeaveLobby = () => {
     disconnectFromGame();
@@ -138,14 +151,14 @@ function Lobby() {
       <div className="p-4 flex-1">
         <div className="flex justify-between items-center mb-3">
           <h3 className="font-display font-bold text-neutral-dark text-lg">
-            Players ({gameState.players.length}/4)
+            Players ({validPlayers.length}/4)
           </h3>
           <div className="text-sm text-neutral">
-            {gameState.players.length < 2 
+            {validPlayers.length < 2 
               ? 'Waiting for more players' 
-              : gameState.players.length >= 4 
+              : validPlayers.length >= 4 
                 ? 'Lobby full' 
-                : `Waiting for ${4 - gameState.players.length} more`}
+                : `Waiting for ${4 - validPlayers.length} more`}
           </div>
         </div>
         
