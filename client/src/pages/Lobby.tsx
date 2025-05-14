@@ -16,7 +16,6 @@ function Lobby() {
   
   // Use a ref to track if we've connected already
   const hasConnectedRef = useRef(false);
-  const userIdRef = useRef<number | null>(null);
   
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -25,11 +24,8 @@ function Lobby() {
       return;
     }
     
-    // Store user ID in ref to prevent dependency changes
-    userIdRef.current = user.id;
-    
-    // Only connect if we haven't connected yet and have valid IDs
-    if (gameId && user.id && !hasConnectedRef.current) {
+    // Connect to the game WebSocket only once
+    if (gameId && user && !hasConnectedRef.current) {
       console.log(`Lobby: Connecting to game ${gameId} as user ${user.id}`);
       connectToGame(gameId, user.id);
       hasConnectedRef.current = true;
@@ -37,14 +33,13 @@ function Lobby() {
     
     // Cleanup when leaving the page
     return () => {
-      if (hasConnectedRef.current) {
+      if (gameId) {
         console.log(`Lobby: Disconnecting from game ${gameId}`);
         disconnectFromGame();
         hasConnectedRef.current = false;
       }
     };
-  // Only include essential dependencies to prevent infinite loops
-  }, [user, navigate]);
+  }, [gameId, user, navigate, connectToGame, disconnectFromGame]);
   
   // Listen for game start event
   useEffect(() => {
