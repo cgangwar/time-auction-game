@@ -7,13 +7,13 @@ interface User {
   id: number;
   username: string;
   displayName: string;
-  email: string;
+  email?: string | null;
 }
 
 interface AuthContextType {
   user: User | null;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, displayName: string, email: string, password: string) => Promise<void>;
+  login: (username: string, password?: string) => Promise<void>;
+  register: (username: string, displayName: string, email?: string, password?: string) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
   error: string | null;
@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Login mutation
   const loginMutation = useMutation({
-    mutationFn: async (credentials: { username: string; password: string }) => {
+    mutationFn: async (credentials: { username: string }) => {
       const res = await apiRequest('POST', '/api/login', credentials);
       return res.json();
     },
@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(err.message || 'Login failed');
       toast({
         title: "Login failed",
-        description: err.message || 'Invalid credentials',
+        description: err.message || 'Could not sign in',
         variant: "destructive"
       });
     },
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Register mutation
   const registerMutation = useMutation({
-    mutationFn: async (userData: { username: string; displayName: string; email: string; password: string }) => {
+    mutationFn: async (userData: { username: string; displayName: string }) => {
       const res = await apiRequest('POST', '/api/register', userData);
       return res.json();
     },
@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('user', JSON.stringify(data));
       setError(null);
       toast({
-        title: "Registration successful",
+        title: "Account created",
         description: `Welcome, ${data.displayName}!`,
       });
     },
@@ -89,14 +89,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
   });
 
-  const login = async (username: string, password: string) => {
+  const login = async (username: string, password?: string) => {
     setError(null);
-    await loginMutation.mutateAsync({ username, password });
+    await loginMutation.mutateAsync({ username });
   };
 
-  const register = async (username: string, displayName: string, email: string, password: string) => {
+  const register = async (username: string, displayName: string, email?: string, password?: string) => {
     setError(null);
-    await registerMutation.mutateAsync({ username, displayName, email, password });
+    await registerMutation.mutateAsync({ username, displayName });
   };
 
   const logout = () => {
@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const value = {
+  const value: AuthContextType = {
     user,
     login,
     register,
