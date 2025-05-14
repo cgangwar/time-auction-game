@@ -235,18 +235,35 @@ function Lobby() {
               <p className="text-sm text-neutral mb-3">
                 As the host, you can start the game when all players are ready.
               </p>
-              <Button 
-                className="w-full py-4"
-                disabled={!allPlayersReady || validPlayers.length < 2}
-                onClick={() => updatePlayerReady(gameId, user.id, true)} // Host sets themselves ready to start the game
-              >
-                <span className="material-icons mr-2">play_arrow</span>
-                {allPlayersReady && validPlayers.length >= 2 
-                  ? 'Start Game' 
-                  : validPlayers.length < 2 
+              
+              {allPlayersReady && validPlayers.length >= 2 ? (
+                // Show a prominent Start Game button when conditions are met
+                <Button 
+                  className="w-full py-4 bg-green-600 hover:bg-green-700 text-lg"
+                  onClick={handleStartGame}
+                >
+                  <span className="material-icons mr-2 text-2xl">play_circle</span>
+                  START GAME
+                </Button>
+              ) : (
+                // Show a disabled button with status
+                <Button 
+                  className="w-full py-4"
+                  disabled={true}
+                >
+                  <span className="material-icons mr-2">info</span>
+                  {validPlayers.length < 2 
                     ? 'Need at least 2 players' 
                     : 'Waiting for players to be ready'}
-              </Button>
+                </Button>
+              )}
+              
+              <div className="mt-4 text-sm text-neutral text-center">
+                <span className="inline-flex items-center">
+                  <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                  Host status: Ready
+                </span>
+              </div>
             </div>
             
             <Button 
