@@ -193,11 +193,34 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (data.type === 'ERROR') {
         console.error('WebSocket error message:', data.message);
         
-        // If the error says user not found, show a more specific error
-        if (data.message === 'User not found') {
+        // Set error state based on the specific error message
+        if (data.message === 'Game already started') {
+          setError('This game has already started. You cannot join it at this time.');
+          toast({
+            title: 'Game Already Started',
+            description: 'This game has already started and cannot be joined.',
+            variant: 'destructive'
+          });
+        } else if (data.message === 'Game not found') {
+          setError('Game not found. It may have been deleted or never existed.');
+          toast({
+            title: 'Game Not Found',
+            description: 'The game you are trying to join does not exist.',
+            variant: 'destructive'
+          });
+        } else if (data.message === 'User not found') {
+          setError('Authentication error. Please try logging in again.');
           toast({
             title: 'Authentication Error',
             description: 'User not found. Please try logging in again.',
+            variant: 'destructive'
+          });
+        } else {
+          // Generic error case
+          setError(`Game error: ${data.message}`);
+          toast({
+            title: 'Game Error',
+            description: data.message,
             variant: 'destructive'
           });
         }
@@ -221,13 +244,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     gameSocket.on('ERROR', handleError);
     
     // Set up connection error handler
-    gameSocket.options.onError = () => {
-      toast({
-        title: 'Connection Error',
-        description: 'There was an error connecting to the game server. Trying to reconnect...',
-        variant: 'destructive'
-      });
-    };
+    gameSocket.setOptions({
+      onError: () => {
+        toast({
+          title: 'Connection Error',
+          description: 'There was an error connecting to the game server. Trying to reconnect...',
+          variant: 'destructive'
+        });
+      }
+    });
     
     // Cleanup on unmount
     return () => {
@@ -284,6 +309,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     sessionUserId.current = null;
     setGameState(null);
     setCountdown(null);
+    setError(null);
     
     // No need to close the socket, we'll keep it alive for potential future connections
   }, []);
@@ -309,7 +335,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     disconnectFromGame,
     updatePlayerReady,
     buzzerHold,
-    buzzerRelease
+    buzzerRelease,
+    error
   };
   
   return (

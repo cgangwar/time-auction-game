@@ -32,6 +32,14 @@ export class GameWebSocket {
       ...options
     };
   }
+  
+  // Allow setting external handlers
+  setOptions(options: WebSocketOptions) {
+    this.options = {
+      ...this.options,
+      ...options
+    };
+  }
 
   connect(userId?: number): Promise<void> {
     return new Promise((resolve, reject) => {
