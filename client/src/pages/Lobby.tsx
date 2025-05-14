@@ -151,14 +151,14 @@ function Lobby() {
       <div className="p-4 flex-1">
         <div className="flex justify-between items-center mb-3">
           <h3 className="font-display font-bold text-neutral-dark text-lg">
-            Players ({validPlayers.length}/4)
+            Players ({validPlayers.length}/2)
           </h3>
           <div className="text-sm text-neutral">
             {validPlayers.length < 2 
               ? 'Waiting for more players' 
-              : validPlayers.length >= 4 
-                ? 'Lobby full' 
-                : `Waiting for ${4 - validPlayers.length} more`}
+              : validPlayers.length >= 2 
+                ? 'Ready to start!' 
+                : `Waiting for ${2 - validPlayers.length} more`}
           </div>
         </div>
         
@@ -207,8 +207,8 @@ function Lobby() {
               </div>
             ))}
           
-          {/* Empty slots */}
-          {Array.from({ length: Math.min(4 - gameState.players.length, 4) }).map((_, index) => (
+          {/* Empty slots - shown only if we need more players to reach minimum */}
+          {validPlayers.length < 2 && Array.from({ length: 2 - validPlayers.length }).map((_, index) => (
             <div 
               key={`empty-${index}`}
               className="bg-white rounded-xl p-4 shadow-sm border border-neutral-light flex items-center border-dashed"
