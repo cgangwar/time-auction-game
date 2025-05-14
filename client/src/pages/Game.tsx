@@ -19,7 +19,8 @@ function Game() {
     gameState, 
     buzzerHold, 
     buzzerRelease, 
-    disconnectFromGame 
+    disconnectFromGame,
+    error: contextError
   } = useGame();
   const { toast } = useToast();
   
@@ -57,32 +58,32 @@ function Game() {
       
       // Set a timeout to check if we've received game state
       const timeoutId = setTimeout(() => {
-        if (!gameState) {
-          setError("Could not connect to game. The game may have already started.");
+        if (!gameState && !contextError) {
+          setError("Could not connect to game. The connection timed out or the game may have already started.");
           setLoading(false);
         }
       }, 5000);
       
+      // Cleanup function
       return () => {
         clearTimeout(timeoutId);
+        disconnectFromGame();
       };
     }
     
-    // Cleanup when leaving the page
-    return () => {
-      if (gameId) {
-        disconnectFromGame();
-      }
-    };
-  }, [gameId, user, navigate, connectToGame, disconnectFromGame]);
+    return undefined;
+  }, [gameId, user, gameState, contextError, navigate, connectToGame, disconnectFromGame]);
   
-  // Reset loading state when game state is received
+  // Reset loading state when game state is received or handle errors
   useEffect(() => {
     if (gameState) {
       setLoading(false);
       setError(null);
+    } else if (contextError) {
+      setError(contextError);
+      setLoading(false);
     }
-  }, [gameState]);
+  }, [gameState, contextError]);
   
   // Handle buzzer hold event
   const handleBuzzerDown = useCallback(() => {
@@ -187,23 +188,45 @@ function Game() {
   }
   
   if (error) {
+    let errorTitle = "Unable to Join Game";
+    let errorMessage = error;
+    let errorSubtext = "Please go back to the home page and try joining another game or creating a new one.";
+    
+    // Customize error message based on content
+    if (error.includes("already started")) {
+      errorTitle = "Game Already Started";
+      errorSubtext = "This game has already begun and cannot be joined. Please join a different game or create a new one.";
+    } else if (error.includes("not found")) {
+      errorTitle = "Game Not Found";
+      errorSubtext = "This game may have been deleted or never existed. Please check the game code and try again.";
+    } else if (error.includes("authentication")) {
+      errorTitle = "Authentication Error";
+      errorSubtext = "Please try logging in again to resolve this issue.";
+    }
+    
     return (
       <>
         <AppHeader />
         <div className="flex-1 flex flex-col items-center justify-center p-6">
           <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md text-center">
             <span className="material-icons text-4xl text-red-500 mb-2">error_outline</span>
-            <h3 className="font-bold text-lg text-red-700 mb-2">Unable to Join Game</h3>
-            <p className="text-red-600 mb-4">{error}</p>
-            <p className="text-neutral mb-4">
-              The game may have already started. Please go back to the home page and try joining another game or creating a new one.
-            </p>
-            <button
-              onClick={() => navigate("/")}
-              className="bg-primary hover:bg-primary-dark text-white font-bold py-2 px-4 rounded"
-            >
-              Back to Home
-            </button>
+            <h3 className="font-bold text-lg text-red-700 mb-2">{errorTitle}</h3>
+            <p className="text-red-600 mb-4">{errorMessage}</p>
+            <p className="text-neutral mb-4">{errorSubtext}</p>
+            <div className="flex justify-center space-x-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-neutral hover:bg-neutral-dark text-white font-bold py-2 px-4 rounded"
+              >
+                Retry
+              </button>
+              <button
+                onClick={() => navigate("/")}
+                className="bg-primary hover:bg-primary-dark text-white font-bold py-2 px-4 rounded"
+              >
+                Back to Home
+              </button>
+            </div>
           </div>
         </div>
       </>
