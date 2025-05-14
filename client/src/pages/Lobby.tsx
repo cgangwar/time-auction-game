@@ -318,6 +318,11 @@ function Lobby() {
           </div>
         </div>
       )}
+      
+      {/* Redirect to game when game starts */}
+      {gameState.status === 'in_progress' && (
+        <>{navigate(`/game/${gameState.id}`, { replace: true })}</>
+      )}
     </div>
   );
 }

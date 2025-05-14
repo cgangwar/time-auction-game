@@ -99,6 +99,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     
     // Handle game start event
     const handleGameStart: GameEventHandler<'GAME_START'> = (data) => {
+      console.log('GAME_START event received, transitioning to game state');
       setCountdown(null);
       setGameState(prevState => {
         if (!prevState) return null;
@@ -109,6 +110,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           countdown: null
         };
       });
+      
+      // Don't disconnect from the socket - the game needs to continue using it
+      // This is important to maintain continuity between lobby and game
     };
     
     // Handle round start event
