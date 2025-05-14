@@ -196,6 +196,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let participant = await storage.getParticipant(gameId, userId);
       console.log(`Participant check for game ${gameId}, user ${userId}: ${participant ? 'exists' : 'not found'}`);
       
+      // Check if this user is the creator of the game
+      const isCreator = game.createdById === userId;
+      console.log(`User ${userId} is creator of game ${gameId}: ${isCreator}`);
+      
       if (!participant) {
         // Add as new participant
         const user = await storage.getUser(userId);
@@ -205,11 +209,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
         
-        console.log(`Adding user ${userId} as participant to game ${gameId}`);
+        console.log(`Adding user ${userId} as participant to game ${gameId}, isHost: ${isCreator}`);
         participant = await storage.addParticipant({
           gameId,
           userId,
-          isHost: false,
+          isHost: isCreator, // Set as host if they created the game
           isReady: false,
           timeBank: game.startingTimeBank,
           tokensWon: 0,
@@ -262,9 +266,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const participants = await storage.getParticipantsByGame(gameId);
       console.log(`Found ${participants.length} participants for game ${gameId}`);
       
+      // Debug participant information
+      console.log('Participants:', participants.map(p => ({
+        userId: p.userId, 
+        isHost: p.isHost,
+        isBot: p.isBot
+      })));
+      
+      // Filter out any invalid participants (userId of 0 or undefined/null)
+      const validParticipants = participants.filter(p => p.userId && p.userId > 0);
+      
       const playerDetails = await Promise.all(
-        participants.map(async (p) => {
+        validParticipants.map(async (p) => {
           const u = await storage.getUser(p.userId);
+          if (!u) {
+            console.log(`User ${p.userId} not found for participant`);
+          }
           return {
             userId: p.userId,
             isHost: p.isHost,
@@ -276,7 +293,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       
       // Build player list with all required information for the client
-      const clientPlayers = participants.map(p => {
+      const clientPlayers = validParticipants.map(p => {
         const user = playerDetails.find(pd => pd.userId === p.userId);
         return {
           id: p.userId,
