@@ -64,13 +64,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       newSocket.onopen = () => {
         console.log('WebSocket connection established successfully');
         
-        // Identify the user to the server
-        console.log(`Identifying user ${userId} to server...`);
-        newSocket.send(JSON.stringify({ type: 'IDENTIFY', userId }));
-        
-        // Join the game room
-        console.log(`Joining game ${gameId}...`);
-        newSocket.send(JSON.stringify({ type: 'JOIN_GAME', gameId, userId }));
+        // Identify the user to the server - but wait a moment to ensure connection is stable
+        setTimeout(() => {
+          console.log(`Identifying user ${userId} to server...`);
+          if (newSocket.readyState === WebSocket.OPEN) {
+            newSocket.send(JSON.stringify({ type: 'IDENTIFY', userId }));
+            
+            // Wait for the server to process the IDENTIFY message before sending JOIN_GAME
+            setTimeout(() => {
+              if (newSocket.readyState === WebSocket.OPEN) {
+                console.log(`Joining game ${gameId}...`);
+                newSocket.send(JSON.stringify({ type: 'JOIN_GAME', gameId, userId }));
+              }
+            }, 500);
+          }
+        }, 300);
       };
       
       newSocket.onmessage = (event) => {
@@ -196,6 +204,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
               });
             }
           }
+          else if (data.type === 'ERROR') {
+            console.error('WebSocket error message:', data.message);
+            
+            // If the error says user not found or other critical errors, try to reconnect
+            if (data.message === 'User not found' || data.message === 'Please identify first') {
+              if (reconnectCount < 3) {
+                // Delay a little longer before retry
+                setTimeout(() => {
+                  if (newSocket.readyState === WebSocket.OPEN) {
+                    newSocket.send(JSON.stringify({ type: 'IDENTIFY', userId }));
+                  }
+                }, 1000);
+              }
+            }
+          }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
         }
@@ -206,20 +229,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         
         if (!event.wasClean) {
           // Connection lost unexpectedly
+          const currentCount = reconnectCount;
           setReconnectCount(prev => prev + 1);
           
           // Try to reconnect after a delay that increases with each attempt
-          setTimeout(() => {
-            connectToGame(gameId, userId);
-          }, 2000 + (reconnectCount * 1000));
-        } else if (reconnectCount >= 3) {
-          toast({
-            title: "Connection Failed",
-            description: "Unable to connect to the game server after multiple attempts. Please try again later.",
-            variant: "destructive"
-          });
-          // Return to home page
-          window.location.href = "/";
+          if (currentCount < 3) {
+            setTimeout(() => {
+              connectToGame(gameId, userId);
+            }, 2000 + (currentCount * 1000));
+          } else {
+            toast({
+              title: "Connection Failed",
+              description: "Unable to connect to the game server after multiple attempts. Please try again later.",
+              variant: "destructive"
+            });
+          }
         }
       };
       
@@ -243,7 +267,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         variant: "destructive"
       });
     }
-  }, [reconnectCount, socket, toast]);
+  }, [reconnectCount, toast]); // Remove socket from dependencies to prevent re-renders
   
   // Disconnect from game
   const disconnectFromGame = useCallback(() => {
