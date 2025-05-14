@@ -877,8 +877,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const publicGames = await storage.getPublicGames();
       
+      // Only return games that are in the 'waiting' state and are public
+      const waitingPublicGames = publicGames.filter(game => 
+        game.status === 'waiting' && game.isPublic === true
+      );
+      
+      if (waitingPublicGames.length === 0) {
+        return res.status(200).json([]);
+      }
+      
       const gamesWithParticipants = await Promise.all(
-        publicGames.map(async (game) => {
+        waitingPublicGames.map(async (game) => {
           const participants = await storage.getParticipantsByGame(game.id);
           
           const players = await Promise.all(
@@ -897,6 +906,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return {
             ...game,
             playerCount: participants.length,
+            maxPlayers: 4,
+            hostName: players.find(p => p.isHost)?.displayName || 'Unknown',
             players
           };
         })
