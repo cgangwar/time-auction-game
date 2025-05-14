@@ -164,11 +164,30 @@ function Lobby() {
                   {player.isHost ? 'Host • ' : ''}{player.isReady ? 'Ready' : 'Not ready'}
                 </div>
               </div>
-              <div className={`w-6 h-6 rounded-full ${player.isReady ? 'bg-[#10B981]' : 'bg-neutral-light'} flex items-center justify-center`}>
-                <span className={`material-icons text-${player.isReady ? 'white' : 'neutral'} text-sm`}>
-                  {player.isReady ? 'check' : 'hourglass_empty'}
-                </span>
-              </div>
+              {player.id === user.id && !player.isHost ? (
+                // If this is the current user and not the host, show a checkbox
+                <div className="flex items-center">
+                  <label className="flex items-center cursor-pointer">
+                    <div className={`w-5 h-5 mr-2 border rounded-sm ${player.isReady ? 'bg-green-500 border-green-600' : 'bg-white border-gray-300'} flex items-center justify-center`}>
+                      {player.isReady && <span className="material-icons text-white text-xs">check</span>}
+                    </div>
+                    <input 
+                      type="checkbox"
+                      className="sr-only"
+                      checked={player.isReady}
+                      onChange={handleToggleReady}
+                    />
+                    <span className="text-sm">{player.isReady ? 'Ready' : 'Ready?'}</span>
+                  </label>
+                </div>
+              ) : (
+                // For other players, just show the ready status indicator
+                <div className={`w-6 h-6 rounded-full ${player.isReady ? 'bg-[#10B981]' : 'bg-neutral-light'} flex items-center justify-center`}>
+                  <span className={`material-icons text-${player.isReady ? 'white' : 'neutral'} text-sm`}>
+                    {player.isReady ? 'check' : 'hourglass_empty'}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
           
@@ -190,33 +209,58 @@ function Lobby() {
         </div>
       </div>
       
-      {/* Start Game Button */}
+      {/* Game Controls */}
       <div className="p-4 border-t border-neutral-light">
         {isHost ? (
-          <Button 
-            className="w-full py-6"
-            disabled={!allPlayersReady || gameState.players.length < 2}
-            onClick={handleToggleReady}
-          >
-            <span className="material-icons mr-2">play_arrow</span>
-            {allPlayersReady ? 'Start Game' : 'Waiting for players'}
-          </Button>
+          // Host controls
+          <div className="space-y-3">
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-neutral-light">
+              <h3 className="font-bold text-neutral-dark mb-2">Host Controls</h3>
+              <p className="text-sm text-neutral mb-3">
+                As the host, you can start the game when all players are ready.
+              </p>
+              <Button 
+                className="w-full py-4"
+                disabled={!allPlayersReady || gameState.players.length < 2}
+                onClick={() => updatePlayerReady(gameId, user.id, true)} // Host sets themselves ready to start the game
+              >
+                <span className="material-icons mr-2">play_arrow</span>
+                {allPlayersReady ? 'Start Game' : 'Waiting for players'}
+              </Button>
+            </div>
+            
+            <Button 
+              className="w-full py-2 border border-neutral-light bg-white text-neutral-dark hover:bg-neutral-lighter"
+              onClick={handleLeaveLobby}
+            >
+              Leave Lobby
+            </Button>
+          </div>
         ) : (
-          <Button 
-            className={`w-full py-6 ${isReady ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}
-            onClick={handleToggleReady}
-          >
-            <span className="material-icons mr-2">{isReady ? 'cancel' : 'check_circle'}</span>
-            {isReady ? 'Cancel Ready' : 'Ready Up'}
-          </Button>
+          // Player controls
+          <div className="space-y-3">
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-neutral-light">
+              <h3 className="font-bold text-neutral-dark mb-2">Ready Status</h3>
+              <p className="text-sm text-neutral mb-3">
+                Click the button below to indicate you're ready to play.
+              </p>
+              <Button 
+                className={`w-full py-4 ${isReady ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}
+                onClick={handleToggleReady}
+              >
+                <span className="material-icons mr-2">{isReady ? 'cancel' : 'check_circle'}</span>
+                {isReady ? 'Cancel Ready' : 'Ready Up'}
+              </Button>
+            </div>
+            
+            <Button 
+              className="w-full py-2 border border-neutral-light bg-white text-neutral-dark hover:bg-neutral-lighter"
+              onClick={handleLeaveLobby}
+            >
+              Leave Lobby
+            </Button>
+          </div>
         )}
-        
-        <Button 
-          className="mt-2 w-full py-2 border border-neutral-light bg-white text-neutral-dark hover:bg-neutral-lighter"
-          onClick={handleLeaveLobby}
-        >
-          Leave Lobby
-        </Button>
       </div>
       
       {/* Game Starting Overlay (when countdown starts) */}

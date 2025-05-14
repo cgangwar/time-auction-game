@@ -736,7 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Add the creator as the first participant and host
       const participant = await storage.addParticipant({
         gameId: game.id,
-        userId: validatedData.hostId,
+        userId: validatedData.createdById, // Use createdById instead of hostId
         isHost: true,
         isReady: false,
         timeBank: validatedData.startingTimeBank,
