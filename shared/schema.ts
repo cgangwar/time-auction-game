@@ -120,6 +120,8 @@ export type InsertRoundBid = z.infer<typeof insertRoundBidSchema>;
 
 // WebSocket message types
 export type GameEvent = 
+  | { type: "IDENTIFY"; userId: number }
+  | { type: "IDENTIFIED"; userId: number }
   | { type: "JOIN_GAME"; gameId: number; userId: number; username: string; displayName: string }
   | { type: "PLAYER_READY"; gameId: number; userId: number; isReady: boolean }
   | { type: "GAME_STARTING"; gameId: number; countdown: number }
@@ -130,7 +132,11 @@ export type GameEvent =
   | { type: "ROUND_END"; gameId: number; roundNumber: number; winnerId: number; winnerHoldTime: number; nextRound: number }
   | { type: "GAME_END"; gameId: number; rankings: Array<{userId: number; username: string; displayName: string; tokens: number; timeRemaining: number}> }
   | { type: "PLAYER_LEFT"; gameId: number; userId: number }
-  | { type: "GAME_CANCELLED"; gameId: number; reason: string };
+  | { type: "GAME_CANCELLED"; gameId: number; reason: string }
+  | { type: "GAME_STATE"; gameId: number; code: string; status: string; currentRound: number; 
+      totalRounds: number; startingTimeBank: number; isPublic: boolean; players: ClientPlayer[];
+      hasBots?: boolean; botCount?: number; botProfiles?: BotProfileType[] }
+  | { type: "ERROR"; message: string };
 
 // Client-specific types
 export type BotProfileType = 'aggressive' | 'conservative' | 'erratic';

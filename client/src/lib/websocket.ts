@@ -36,15 +36,27 @@ export class GameWebSocket {
   connect(userId?: number): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        // Close any existing socket before creating a new one
+        if (this.socket) {
+          this.socket.close();
+          this.socket = null;
+        }
+        
+        console.log(`Connecting to WebSocket at ${this.url}...`);
         this.socket = new WebSocket(this.url);
 
         this.socket.onopen = () => {
-          console.log('WebSocket connection established');
+          console.log('WebSocket connection established successfully');
           this.reconnectAttempts = 0;
           
-          // Identify user if userId is provided
+          // Identify user if userId is provided, but with a slight delay
           if (userId) {
-            this.send({ type: 'IDENTIFY', userId });
+            setTimeout(() => {
+              console.log(`Identifying user ${userId} to server...`);
+              if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.send({ type: 'IDENTIFY', userId });
+              }
+            }, 100);
           }
           
           if (this.options.onOpen) {
@@ -55,7 +67,7 @@ export class GameWebSocket {
         };
 
         this.socket.onclose = (event) => {
-          console.log('WebSocket connection closed', event);
+          console.log('WebSocket connection closed:', event);
           
           if (this.options.onClose) {
             this.options.onClose();
@@ -64,10 +76,12 @@ export class GameWebSocket {
           // Attempt to reconnect if enabled
           if (this.options.reconnect && this.reconnectAttempts < (this.options.maxReconnectAttempts || 5)) {
             this.reconnectAttempts++;
+            const delay = this.options.reconnectInterval! * (1 + (this.reconnectAttempts * 0.3));
             setTimeout(() => {
               console.log(`Attempting to reconnect (${this.reconnectAttempts})...`);
-              this.connect(userId);
-            }, this.options.reconnectInterval);
+              this.connect(userId)
+                .catch(err => console.error('Failed to reconnect:', err));
+            }, delay);
           }
         };
 
@@ -78,7 +92,10 @@ export class GameWebSocket {
             this.options.onError(error);
           }
           
-          reject(error);
+          // Only reject if this is the initial connection attempt
+          if (this.reconnectAttempts === 0) {
+            reject(error);
+          }
         };
 
         this.socket.onmessage = (event) => {
@@ -87,6 +104,21 @@ export class GameWebSocket {
             console.log('WebSocket message received:', data);
             
             if (data.type) {
+              // Special handling for ERROR messages
+              if (data.type === 'ERROR') {
+                console.error('WebSocket error message:', data.message);
+                
+                // If we get "Please identify first", retry identification
+                if (data.message === 'Please identify first' && userId) {
+                  setTimeout(() => {
+                    console.log('Retrying identification...');
+                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                      this.send({ type: 'IDENTIFY', userId });
+                    }
+                  }, 500);
+                }
+              }
+                
               const handlers = this.messageHandlers.get(data.type) || [];
               handlers.forEach(handler => handler(data));
               
