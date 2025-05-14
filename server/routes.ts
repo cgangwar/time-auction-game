@@ -635,37 +635,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // API Routes
   
-  // User registration
+  // User registration - simplified to username-only
   app.post('/api/register', async (req: Request, res: Response) => {
     try {
       const validatedData = insertUserSchema.parse({
         ...req.body,
-        // Add default display name if not provided
+        // Always set display name to username if not provided
         displayName: req.body.displayName || req.body.username
       });
       
       // Check if username already exists
       const existingUser = await storage.getUserByUsername(validatedData.username);
       if (existingUser) {
-        return res.status(409).json({ message: 'Username already taken' });
+        // If user exists, just return the user (simplified login)
+        const { password, ...userWithoutPassword } = existingUser;
+        return res.status(200).json(userWithoutPassword);
       }
       
-      // Check if email already exists
-      const existingEmail = await storage.getUserByEmail(validatedData.email);
-      if (existingEmail) {
-        return res.status(409).json({ message: 'Email already registered' });
-      }
-      
-      // Hash password (in a real app you would use bcrypt)
-      const hashedPassword = crypto
-        .createHash('sha256')
-        .update(validatedData.password)
-        .digest('hex');
-      
-      // Create user
+      // Create new user with just username and displayName
       const user = await storage.createUser({
-        ...validatedData,
-        password: hashedPassword
+        username: validatedData.username,
+        displayName: validatedData.displayName
       });
       
       // Remove password from response
@@ -676,41 +666,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: 'Invalid input', errors: error.errors });
       } else {
+        console.error('Registration error:', error);
         res.status(500).json({ message: 'Internal server error' });
       }
     }
   });
   
-  // User login
+  // User login - simplified to username-only
   app.post('/api/login', async (req: Request, res: Response) => {
     try {
-      const { username, password } = req.body;
+      const { username } = req.body;
       
-      if (!username || !password) {
-        return res.status(400).json({ message: 'Username and password required' });
+      if (!username) {
+        return res.status(400).json({ message: 'Username is required' });
       }
       
       // Find user
       const user = await storage.getUserByUsername(username);
       if (!user) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+        // Auto-create user if not found
+        const newUser = await storage.createUser({
+          username,
+          displayName: username
+        });
+        
+        const { password, ...userWithoutPassword } = newUser;
+        return res.status(200).json(userWithoutPassword);
       }
       
-      // Hash password and compare
-      const hashedPassword = crypto
-        .createHash('sha256')
-        .update(password)
-        .digest('hex');
-      
-      if (user.password !== hashedPassword) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-      
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
+      // Return user without password
+      const { password, ...userWithoutPassword } = user;
       
       res.status(200).json(userWithoutPassword);
     } catch (error) {
+      console.error('Login error:', error);
       res.status(500).json({ message: 'Internal server error' });
     }
   });

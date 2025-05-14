@@ -88,8 +88,8 @@ export class MemStorage implements IStorage {
       id: 1,
       username: 'testuser',
       displayName: 'Test User',
-      email: 'test@example.com',
-      password: 'testpassword', // Not secure, but fine for in-memory dev
+      email: null,
+      password: null, // No password needed with new simplified login
       createdAt: new Date()
     };
     this.users.set(1, testUser);
@@ -144,15 +144,24 @@ export class MemStorage implements IStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
+    if (!email) return undefined;
+    
     return Array.from(this.users.values()).find(
-      (user) => user.email.toLowerCase() === email.toLowerCase()
+      (user) => user.email && user.email.toLowerCase() === email.toLowerCase()
     );
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = this.userIdCounter++;
     const now = new Date();
-    const user: User = { ...insertUser, id, createdAt: now };
+    const user: User = { 
+      id, 
+      username: insertUser.username,
+      displayName: insertUser.displayName || insertUser.username,
+      email: insertUser.email || null,
+      password: insertUser.password || null,
+      createdAt: now 
+    };
     this.users.set(id, user);
     return user;
   }

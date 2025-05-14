@@ -69,6 +69,11 @@ export const roundBids = pgTable("round_bids", {
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+}).extend({
+  username: z.string().min(2, "Username must be at least 2 characters").max(20, "Username must be less than 20 characters"),
+  displayName: z.string().min(2, "Display name must be at least 2 characters").max(50, "Display name must be less than 50 characters").optional(),
+  email: z.string().email("Please enter a valid email address").optional(),
+  password: z.string().optional(),
 });
 
 export const insertGameSchema = createInsertSchema(games).omit({
