@@ -82,6 +82,54 @@ export class MemStorage implements IStorage {
     this.participantIdCounter = 1;
     this.roundIdCounter = 1;
     this.bidIdCounter = 1;
+    
+    // Add a test user for development
+    const testUser = {
+      id: 1,
+      username: 'testuser',
+      displayName: 'Test User',
+      email: 'test@example.com',
+      password: 'testpassword', // Not secure, but fine for in-memory dev
+      createdAt: new Date()
+    };
+    this.users.set(1, testUser);
+    
+    // Create a test game
+    const testGame = {
+      id: 1,
+      code: 'TESTGAME',
+      createdById: 1,
+      status: 'waiting' as const,
+      currentRound: 0,
+      totalRounds: 18,
+      startingTimeBank: 600,
+      isPublic: true,
+      hasBots: false,
+      botCount: 0,
+      botProfiles: [],
+      createdAt: new Date(),
+      startedAt: null,
+      endedAt: null
+    };
+    this.games.set(1, testGame);
+    
+    // Add the creator as a participant and host
+    const testParticipant = {
+      id: 1,
+      gameId: 1,
+      userId: 1,
+      isHost: true,
+      isReady: false,
+      timeBank: 600,
+      tokensWon: 0,
+      isEliminated: false,
+      isBot: false,
+      botProfile: null,
+      joinedAt: new Date()
+    };
+    this.gameParticipants.set('1-1', testParticipant);
+    
+    console.log('Added test user with ID 1 and test game with ID 1 for development');
   }
 
   // User operations

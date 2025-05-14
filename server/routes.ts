@@ -896,6 +896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get public games
   app.get('/api/games/public', async (req: Request, res: Response) => {
     try {
+      // No game ID needed for this endpoint - it returns all public games
       const publicGames = await storage.getPublicGames();
       
       // Only return games that are in the 'waiting' state and are public
