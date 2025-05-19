@@ -108,10 +108,8 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
         const elapsed = Date.now() - startTimeRef.current;
         const seconds = elapsed / 1000;
         
-        // Format time as MM:SS.T
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        const formattedTime = `${String(mins).padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+        // Format time as SS.SS
+        const formattedTime = seconds.toFixed(1) + "s";
         
         setHoldTime(elapsed);
         setDisplayTime(formattedTime);
@@ -128,16 +126,13 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
           timeBankEl.textContent = remainingDisplay;
         }
         
-        // Log to confirm timer is running
-        console.log('Timer update - elapsed:', formattedTime);
-        
         // Continue the animation frame loop
         animationRef.current = requestAnimationFrame(updateTimer);
       }
     };
     
-    // Start the animation loop
-    animationRef.current = requestAnimationFrame(updateTimer);
+    // Start the animation loop immediately
+    updateTimer();
   };
 
   const stopTimer = () => {

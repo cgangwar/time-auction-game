@@ -318,13 +318,20 @@ function Game() {
           </div>
           
           {/* Buzzer Area */}
-          <Buzzer 
-            active={buzzerActive}
-            onHold={handleBuzzerDown}
-            onRelease={handleBuzzerUp}
-            disabled={!gameState || gameState.status !== 'in_progress' || (currentPlayer?.isEliminated || false)}
-            timeBank={timeBank}
-          />
+          <div className="relative">
+            {buzzerActive && (
+              <div className="absolute -top-14 left-1/2 transform -translate-x-1/2 bg-accent text-white py-1 px-4 rounded-full text-xl font-bold">
+                {commonTime}
+              </div>
+            )}
+            <Buzzer 
+              active={buzzerActive}
+              onHold={handleBuzzerDown}
+              onRelease={handleBuzzerUp}
+              disabled={!gameState || gameState.status !== 'in_progress' || (currentPlayer?.isEliminated || false)}
+              timeBank={timeBank}
+            />
+          </div>
           
           {/* Player's Remaining Time Bank */}
           <div className="w-full mt-6">
