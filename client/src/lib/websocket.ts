@@ -19,6 +19,7 @@ export class GameWebSocket {
   private url: string;
   private reconnectAttempts = 0;
   private options: WebSocketOptions;
+  public isIdentified = false;
 
   constructor(url?: string, options: WebSocketOptions = {}) {
     // If no URL is provided, use the default WebSocket URL
@@ -57,14 +58,21 @@ export class GameWebSocket {
           console.log('WebSocket connection established successfully');
           this.reconnectAttempts = 0;
           
-          // Identify user if userId is provided, but with a slight delay
+          // Identify user if userId is provided, with a longer delay to ensure connection is ready
           if (userId) {
+            // Wait for connection to be fully established
             setTimeout(() => {
               console.log(`Identifying user ${userId} to server...`);
               if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                 this.send({ type: 'IDENTIFY', userId });
+                
+                // Add another delay before any subsequent messages
+                setTimeout(() => {
+                  // Set a flag that we've identified
+                  this.isIdentified = true;
+                }, 300);
               }
-            }, 100);
+            }, 300);
           }
           
           if (this.options.onOpen) {
@@ -118,13 +126,25 @@ export class GameWebSocket {
                 
                 // If we get "Please identify first", retry identification
                 if (data.message === 'Please identify first' && userId) {
+                  this.isIdentified = false; // Reset identified status
                   setTimeout(() => {
                     console.log('Retrying identification...');
                     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                       this.send({ type: 'IDENTIFY', userId });
+                      
+                      // Mark as identified after a small delay
+                      setTimeout(() => {
+                        this.isIdentified = true;
+                      }, 300);
                     }
-                  }, 500);
+                  }, 300);
                 }
+              }
+              
+              // If it's an IDENTIFIED message, mark connection as identified
+              if (data.type === 'IDENTIFIED') {
+                console.log('Successfully identified with server');
+                this.isIdentified = true;
               }
                 
               const handlers = this.messageHandlers.get(data.type) || [];
@@ -154,6 +174,16 @@ export class GameWebSocket {
 
   send(data: any): boolean {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // If we're trying to send a non-identify message and haven't identified yet, queue it
+      if (data.type !== 'IDENTIFY' && !this.isIdentified) {
+        console.log('Waiting for identification before sending:', data);
+        setTimeout(() => {
+          console.log('Retrying send after identification delay:', data);
+          this.send(data);
+        }, 500);
+        return true;
+      }
+      
       this.socket.send(JSON.stringify(data));
       return true;
     }
