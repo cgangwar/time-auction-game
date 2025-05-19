@@ -17,37 +17,52 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
   const animationRef = useRef<number | null>(null);
 
   // Sync the local active state with the prop
+  // Only update local state from props when props change from inactive to active
   useEffect(() => {
-    setLocalActive(active);
-  }, [active]);
+    if (active !== localActive && active === true) {
+      setLocalActive(true);
+    } else if (active === false && !startTimeRef.current) {
+      // Only set to inactive if we're not currently timing
+      setLocalActive(false);
+    }
+  }, [active, localActive]);
 
   // Handle mouse events
   const handleMouseDown = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
+    
     // Start timing and call the hold function
-    setLocalActive(true);
-    startTimeRef.current = Date.now();
-    onHold();
-    startTimer();
+    if (!localActive) {
+      console.log('Mouse down - starting timer');
+      setLocalActive(true);
+      startTimeRef.current = Date.now(); // Set start time
+      startTimer(); // Start the timer animation
+      onHold(); // Call parent callback
+    }
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
+    
     // Only release if we're currently active
     if (localActive) {
+      console.log('Mouse up - stopping timer');
+      const finalHoldTime = holdTime > 0 ? holdTime : 0;
       stopTimer();
-      onRelease();
       setLocalActive(false);
+      onRelease();
     }
   };
 
   const handleMouseLeave = (e: React.MouseEvent) => {
     if (localActive) {
+      console.log('Mouse leave - stopping timer');
+      const finalHoldTime = holdTime > 0 ? holdTime : 0;
       stopTimer();
-      onRelease();
       setLocalActive(false);
+      onRelease();
     }
   };
 
@@ -55,32 +70,41 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
   const handleTouchStart = (e: React.TouchEvent) => {
     if (disabled) return;
     e.preventDefault();
-    setTouchStarted(true);
+    
     // Start timing and call hold
-    setLocalActive(true);
-    startTimeRef.current = Date.now();
-    onHold();
-    startTimer();
+    if (!localActive) {
+      console.log('Touch start - starting timer');
+      setTouchStarted(true);
+      setLocalActive(true);
+      startTimeRef.current = Date.now();
+      startTimer();
+      onHold();
+    }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (disabled) return;
     e.preventDefault();
-    setTouchStarted(false);
+    
     // Stop timing and release
     if (localActive) {
+      console.log('Touch end - stopping timer');
+      setTouchStarted(false);
+      const finalHoldTime = holdTime > 0 ? holdTime : 0;
       stopTimer();
-      onRelease();
       setLocalActive(false);
+      onRelease();
     }
   };
 
   // Timer functions
   const startTimer = () => {
-    if (!startTimeRef.current) return;
+    if (!startTimeRef.current) {
+      startTimeRef.current = Date.now();
+    }
     
     const updateTimer = () => {
-      if (startTimeRef.current && localActive) {
+      if (startTimeRef.current) {
         const elapsed = Date.now() - startTimeRef.current;
         const seconds = elapsed / 1000;
         
@@ -104,15 +128,16 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
           timeBankEl.textContent = remainingDisplay;
         }
         
-        // Keep the timer running only if we're still active
-        if (localActive) {
-          animationRef.current = requestAnimationFrame(updateTimer);
-        }
+        // Log to confirm timer is running
+        console.log('Timer update - elapsed:', formattedTime);
+        
+        // Continue the animation frame loop
+        animationRef.current = requestAnimationFrame(updateTimer);
       }
     };
     
-    // Initial call to set things up
-    updateTimer();
+    // Start the animation loop
+    animationRef.current = requestAnimationFrame(updateTimer);
   };
 
   const stopTimer = () => {
