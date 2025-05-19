@@ -10,37 +10,44 @@ interface BuzzerProps {
 
 function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: BuzzerProps) {
   const [touchStarted, setTouchStarted] = useState(false);
+  const [localActive, setLocalActive] = useState(false); // Local active state 
   const [holdTime, setHoldTime] = useState(0);
   const [displayTime, setDisplayTime] = useState('00:00.0');
   const startTimeRef = useRef<number | null>(null);
   const animationRef = useRef<number | null>(null);
+
+  // Sync the local active state with the prop
+  useEffect(() => {
+    setLocalActive(active);
+  }, [active]);
 
   // Handle mouse events
   const handleMouseDown = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
     // Start timing and call the hold function
-    if (!active) {
-      startTimeRef.current = Date.now();
-      onHold();
-      startTimer();
-    }
+    setLocalActive(true);
+    startTimeRef.current = Date.now();
+    onHold();
+    startTimer();
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
     // Only release if we're currently active
-    if (active) {
+    if (localActive) {
       stopTimer();
       onRelease();
+      setLocalActive(false);
     }
   };
 
   const handleMouseLeave = (e: React.MouseEvent) => {
-    if (active) {
+    if (localActive) {
       stopTimer();
       onRelease();
+      setLocalActive(false);
     }
   };
 
@@ -50,11 +57,10 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
     e.preventDefault();
     setTouchStarted(true);
     // Start timing and call hold
-    if (!active) {
-      startTimeRef.current = Date.now();
-      onHold();
-      startTimer();
-    }
+    setLocalActive(true);
+    startTimeRef.current = Date.now();
+    onHold();
+    startTimer();
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -62,9 +68,10 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
     e.preventDefault();
     setTouchStarted(false);
     // Stop timing and release
-    if (active) {
+    if (localActive) {
       stopTimer();
       onRelease();
+      setLocalActive(false);
     }
   };
 
@@ -73,7 +80,7 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
     if (!startTimeRef.current) return;
     
     const updateTimer = () => {
-      if (startTimeRef.current) {
+      if (startTimeRef.current && localActive) {
         const elapsed = Date.now() - startTimeRef.current;
         const seconds = elapsed / 1000;
         
@@ -97,11 +104,15 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
           timeBankEl.textContent = remainingDisplay;
         }
         
-        animationRef.current = requestAnimationFrame(updateTimer);
+        // Keep the timer running only if we're still active
+        if (localActive) {
+          animationRef.current = requestAnimationFrame(updateTimer);
+        }
       }
     };
     
-    animationRef.current = requestAnimationFrame(updateTimer);
+    // Initial call to set things up
+    updateTimer();
   };
 
   const stopTimer = () => {
@@ -128,7 +139,7 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
 
   return (
     <div 
-      className={`w-56 h-56 rounded-full bg-primary flex flex-col items-center justify-center shadow-lg transition-all duration-200 ${active ? 'bg-secondary buzzer-active' : 'buzzer-shadow'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      className={`w-56 h-56 rounded-full bg-primary flex flex-col items-center justify-center shadow-lg transition-all duration-200 ${localActive ? 'bg-secondary buzzer-active' : 'buzzer-shadow'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
@@ -139,20 +150,20 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
         <div className="font-display text-lg font-medium">
           {disabled 
             ? "BUZZER DISABLED" 
-            : active 
+            : localActive 
               ? "HOLDING..." 
               : "HOLD TO BID"
           }
         </div>
         
-        {active && (
+        {localActive && (
           <div className="text-2xl font-bold mt-2">
             {displayTime}
           </div>
         )}
         
         <div className="text-sm opacity-80 mt-1">
-          {!active ? "Longest hold wins the round" : "Time remaining"}
+          {!localActive ? "Longest hold wins the round" : "Time remaining"}
         </div>
       </div>
     </div>
