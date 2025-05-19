@@ -326,6 +326,19 @@ function Game() {
         </div>
       </div>
       
+      {/* Game Controls */}
+      <div className="fixed top-20 right-4 z-10">
+        <button 
+          onClick={() => navigate("/")}
+          className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow-lg"
+          aria-label="Exit Game"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      
       {/* Game Starting Overlay */}
       {gameState.countdown !== null && (
         <GameStartingOverlay countdown={gameState.countdown} />

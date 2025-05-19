@@ -14,13 +14,19 @@ function Buzzer({ active, onHold, onRelease, disabled = false }: BuzzerProps) {
   const handleMouseDown = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
-    onHold();
+    // Set mouseDown state to true and call the hold function
+    if (!active) {
+      onHold();
+    }
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
-    onRelease();
+    // Only release if we're currently active
+    if (active) {
+      onRelease();
+    }
   };
 
   const handleMouseLeave = (e: React.MouseEvent) => {
@@ -34,14 +40,20 @@ function Buzzer({ active, onHold, onRelease, disabled = false }: BuzzerProps) {
     if (disabled) return;
     e.preventDefault();
     setTouchStarted(true);
-    onHold();
+    // Only call hold if not already active
+    if (!active) {
+      onHold();
+    }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (disabled) return;
     e.preventDefault();
     setTouchStarted(false);
-    onRelease();
+    // Only release if we're active
+    if (active) {
+      onRelease();
+    }
   };
 
   // Cleanup on component unmount
