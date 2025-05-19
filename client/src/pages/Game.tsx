@@ -323,6 +323,7 @@ function Game() {
             onHold={handleBuzzerDown}
             onRelease={handleBuzzerUp}
             disabled={!gameState || gameState.status !== 'in_progress' || (currentPlayer?.isEliminated || false)}
+            timeBank={timeBank}
           />
           
           {/* Player's Remaining Time Bank */}
