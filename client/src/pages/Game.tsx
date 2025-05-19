@@ -113,9 +113,8 @@ function Game() {
         const elapsed = Date.now() - startTime;
         const seconds = elapsed / 1000;
         
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        const formattedTime = `${String(mins).padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+        // Simpler, more readable time format
+        const formattedTime = seconds.toFixed(1) + "s";
         
         setCommonTime(formattedTime);
         setBuzzerHoldTime(elapsed);
@@ -129,13 +128,16 @@ function Game() {
           player.textContent = `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
         }
         
+        // Always continue the animation as long as buzzer is active
         if (buzzerActive) {
           animationRef.current = requestAnimationFrame(updateTimer);
         }
       }
     };
     
-    animationRef.current = requestAnimationFrame(updateTimer);
+    // Start the timer immediately
+    updateTimer();
+    // We've already started the timer, no need to call requestAnimationFrame again
   }, [buzzerActive, gameId, gameState, user, buzzerHold]);
   
   // Handle buzzer release event
