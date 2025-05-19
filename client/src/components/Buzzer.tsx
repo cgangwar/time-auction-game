@@ -172,24 +172,28 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
       onTouchEnd={handleTouchEnd}
     >
       <div className="text-center text-white">
-        <div className="font-display text-lg font-medium">
-          {disabled 
-            ? "BUZZER DISABLED" 
-            : localActive 
-              ? "HOLDING..." 
-              : "HOLD TO BID"
-          }
-        </div>
-        
-        {localActive && (
-          <div className="text-2xl font-bold mt-2">
-            {displayTime}
-          </div>
+        {localActive ? (
+          <>
+            <div className="font-display text-lg font-medium">
+              HOLDING...
+            </div>
+            <div className="text-2xl font-bold mt-2">
+              {displayTime}
+            </div>
+            <div className="text-sm opacity-80 mt-1">
+              Time spent
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="font-display text-lg font-medium">
+              {disabled ? "BUZZER DISABLED" : "HOLD TO BID"}
+            </div>
+            <div className="text-sm opacity-80 mt-4">
+              Longest hold wins the round
+            </div>
+          </>
         )}
-        
-        <div className="text-sm opacity-80 mt-1">
-          {!localActive ? "Longest hold wins the round" : "Time remaining"}
-        </div>
       </div>
     </div>
   );
