@@ -176,7 +176,7 @@ function Home() {
                 </Button>
                 <Button 
                   variant="default" 
-                  className="bg-secondary text-white py-6"
+                  className="bg-secondary text-white py-6 hover:bg-secondary/90"
                   onClick={() => setShowCreateDialog(true)}
                 >
                   <span className="material-icons mr-2">casino</span>
