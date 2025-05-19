@@ -100,6 +100,7 @@ function Game() {
     const currentPlayer = gameState.players.find(p => p.id === user.id);
     if (!currentPlayer || currentPlayer.isEliminated) return;
     
+    console.log('Buzzer hold initiated');
     const currentTime = Date.now();
     setBuzzerActive(true);
     setBuzzerStartTime(currentTime);
@@ -107,8 +108,9 @@ function Game() {
     
     // Start the animation frame for updating the timer
     const updateTimer = () => {
-      if (buzzerStartTime) {
-        const elapsed = Date.now() - buzzerStartTime;
+      const startTime = currentTime;
+      if (startTime) {
+        const elapsed = Date.now() - startTime;
         const seconds = elapsed / 1000;
         
         const mins = Math.floor(seconds / 60);
@@ -118,17 +120,29 @@ function Game() {
         setCommonTime(formattedTime);
         setBuzzerHoldTime(elapsed);
         
-        animationRef.current = requestAnimationFrame(updateTimer);
+        // Update the player's time bank preview
+        const newTimeBank = Math.max(0, currentPlayer.timeBank - (elapsed / 1000));
+        const player = document.getElementById('player-timebank');
+        if (player) {
+          const mins = Math.floor(newTimeBank / 60);
+          const secs = newTimeBank % 60;
+          player.textContent = `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
+        }
+        
+        if (buzzerActive) {
+          animationRef.current = requestAnimationFrame(updateTimer);
+        }
       }
     };
     
     animationRef.current = requestAnimationFrame(updateTimer);
-  }, [buzzerActive, buzzerStartTime, gameId, gameState, user, buzzerHold]);
+  }, [buzzerActive, gameId, gameState, user, buzzerHold]);
   
   // Handle buzzer release event
   const handleBuzzerUp = useCallback(() => {
     if (!buzzerActive || !gameState || !user || !gameId) return;
     
+    console.log('Buzzer release initiated with hold time:', buzzerHoldTime);
     setBuzzerActive(false);
     
     // Cancel animation frame
@@ -139,13 +153,22 @@ function Game() {
     
     // Send the buzzer release event with hold time
     if (buzzerHoldTime > 0) {
-      buzzerRelease(gameId, user.id, buzzerHoldTime);
+      // Make sure we send the final hold time
+      const finalHoldTime = buzzerStartTime ? Date.now() - buzzerStartTime : buzzerHoldTime;
+      console.log('Sending buzzer release with hold time:', finalHoldTime);
+      buzzerRelease(gameId, user.id, finalHoldTime);
+      
+      // Update the game state after release
+      toast({
+        title: "Time spent",
+        description: `You spent ${(finalHoldTime / 1000).toFixed(1)} seconds from your time bank.`,
+      });
     }
     
     // Reset buzzer state
     setBuzzerStartTime(null);
     setBuzzerHoldTime(0);
-  }, [buzzerActive, buzzerHoldTime, gameId, gameState, user, buzzerRelease]);
+  }, [buzzerActive, buzzerHoldTime, buzzerStartTime, gameId, gameState, user, buzzerRelease, toast]);
   
   // Handle buzzer hold/release events from other players
   useEffect(() => {
@@ -306,7 +329,7 @@ function Game() {
           <div className="w-full mt-6">
             <div className="flex justify-between items-center mb-2">
               <div className="text-sm font-medium text-neutral-dark">Your Time Bank</div>
-              <div className="font-display font-bold text-lg text-accent-dark">
+              <div id="player-timebank" className="font-display font-bold text-lg text-accent-dark">
                 {formatTime(timeBank)}
               </div>
             </div>
