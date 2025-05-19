@@ -635,16 +635,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!clients) return;
     
     const messageStr = JSON.stringify(message);
+    let connectedPlayers = 0;
     
     clients.forEach((socket, userId) => {
       if (socket.readyState === WebSocket.OPEN) {
         try {
           socket.send(messageStr);
+          connectedPlayers++;
         } catch (error) {
           console.error(`Error broadcasting to user ${userId}:`, error);
         }
       }
     });
+    
+    // If no players are connected to this game, check if we should clean it up
+    if (connectedPlayers === 0 && message.type !== 'GAME_CANCELLED') {
+      console.log(`No players connected to game ${gameId}, checking if cleanup needed`);
+      handleEmptyGame(gameId);
+    }
+  }
+  
+  // Handle case when a game is empty (no connected players)
+  async function handleEmptyGame(gameId: number) {
+    try {
+      const game = await storage.getGame(gameId);
+      if (!game) return;
+      
+      const participants = await storage.getParticipantsByGame(gameId);
+      
+      // If game has less than 2 players or is in waiting state with no players
+      if (participants.length < 2 || 
+          (game.status === 'waiting' && gameClients.get(gameId)?.size === 0)) {
+        console.log(`Game ${gameId} has insufficient players (${participants.length}), marking as completed`);
+        await storage.updateGameStatus(gameId, 'completed');
+        await storage.setGameEndTime(gameId);
+        
+        // Clean up game clients map
+        gameClients.delete(gameId);
+      }
+    } catch (error) {
+      console.error(`Error handling empty game ${gameId}:`, error);
+    }
   }
   
   // API Routes
