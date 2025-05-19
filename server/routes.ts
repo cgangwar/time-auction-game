@@ -678,6 +678,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
   
+  // Game cleanup function - run periodically to clean up inactive or empty games
+  async function cleanupGames() {
+    try {
+      console.log("Running game cleanup process...");
+      const allGames = await storage.getPublicGames();
+      
+      for (const game of allGames) {
+        // Check if game should be cleaned up
+        const participants = await storage.getParticipantsByGame(game.id);
+        
+        // Calculate active clients in this game
+        const gameClientMap = gameClients.get(game.id) || new Map();
+        const activeClients = Array.from(gameClientMap.values()).filter(
+          socket => socket.readyState === WebSocket.OPEN
+        ).length;
+        
+        // Mark games as completed if:
+        // 1. Game has fewer than 2 participants, or
+        // 2. Game has no active clients connected and is in waiting state
+        if (participants.length < 2 || 
+            (activeClients === 0 && game.status === 'waiting')) {
+          console.log(`Cleaning up game ${game.id} - ${participants.length} participants, ${activeClients} active clients`);
+          await storage.updateGameStatus(game.id, 'completed');
+          await storage.setGameEndTime(game.id);
+          if (gameClients.has(game.id)) {
+            gameClients.delete(game.id);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error in game cleanup process:", error);
+    }
+  }
+  
+  // Set up periodic game cleanup (every 5 minutes)
+  setInterval(cleanupGames, 5 * 60 * 1000);
+  
   // API Routes
   
   // User registration - simplified to username-only
