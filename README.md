@@ -2,7 +2,6 @@
 
 A real-time multiplayer strategy game featuring a dynamic time-based bidding system with enhanced interactive gameplay mechanics.
 
-![Time Auction Game](attached_assets/image_1747198517557.png)
 
 ## Description
 
