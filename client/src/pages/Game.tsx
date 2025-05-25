@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGame } from "@/contexts/GameContext";
@@ -105,72 +106,32 @@ function Game() {
     setBuzzerActive(true);
     setBuzzerStartTime(currentTime);
     buzzerHold(gameId as number, user.id);
-    
-    // Start the animation frame for updating the timer
-    const updateTimer = () => {
-      const startTime = currentTime;
-      if (startTime) {
-        const elapsed = Date.now() - startTime;
-        const seconds = elapsed / 1000;
-        
-        // Simpler, more readable time format
-        const formattedTime = seconds.toFixed(1) + "s";
-        
-        setCommonTime(formattedTime);
-        setBuzzerHoldTime(elapsed);
-        
-        // Update the player's time bank preview
-        const newTimeBank = Math.max(0, currentPlayer.timeBank - (elapsed / 1000));
-        const player = document.getElementById('player-timebank');
-        if (player) {
-          const mins = Math.floor(newTimeBank / 60);
-          const secs = newTimeBank % 60;
-          player.textContent = `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
-        }
-        
-        // Always continue the animation as long as buzzer is active
-        if (buzzerActive) {
-          animationRef.current = requestAnimationFrame(updateTimer);
-        }
-      }
-    };
-    
-    // Start the timer immediately
-    updateTimer();
-    // We've already started the timer, no need to call requestAnimationFrame again
+    // The Buzzer component will handle its own timer display.
+    // Game.tsx will receive the final hold time via onRelease.
+    // The buzzerHoldTime state in Game.tsx will be determined by buzzerStartTime and Date.now() in handleBuzzerUp.
   }, [buzzerActive, gameId, gameState, user, buzzerHold]);
   
   // Handle buzzer release event
-  const handleBuzzerUp = useCallback(() => {
-    if (!buzzerActive || !gameState || !user || !gameId) return;
+  const handleBuzzerUp = useCallback((holdTime: number) => {
+    if (!gameState || !user || !gameId) return;
     
-    console.log('Buzzer release initiated with hold time:', buzzerHoldTime);
+    console.log('Buzzer release initiated with hold time:', holdTime);
     setBuzzerActive(false);
     
-    // Cancel animation frame
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-      animationRef.current = null;
-    }
-    
     // Send the buzzer release event with hold time
-    if (buzzerHoldTime > 0) {
-      // Make sure we send the final hold time
-      const finalHoldTime = buzzerStartTime ? Date.now() - buzzerStartTime : buzzerHoldTime;
-      console.log('Sending buzzer release with hold time:', finalHoldTime);
-      buzzerRelease(gameId, user.id, finalHoldTime);
-      
-      // Update the game state after release
-      toast({
-        title: "Time spent",
-        description: `You spent ${(finalHoldTime / 1000).toFixed(1)} seconds from your time bank.`,
-      });
-    }
+    console.log('Sending buzzer release with hold time:', holdTime);
+    buzzerRelease(gameId, user.id, holdTime);
+    
+    // Update the game state after release
+    toast({
+      title: "Time spent",
+      description: `You spent ${(holdTime / 1000).toFixed(1)} seconds from your time bank.`,
+    });
     
     // Reset buzzer state
     setBuzzerStartTime(null);
     setBuzzerHoldTime(0);
-  }, [buzzerActive, buzzerHoldTime, buzzerStartTime, gameId, gameState, user, buzzerRelease, toast]);
+  }, [gameId, gameState, user, buzzerRelease, toast]);
   
   // Handle buzzer hold/release events from other players
   useEffect(() => {
@@ -195,6 +156,18 @@ function Game() {
   const timeBank = currentPlayer?.timeBank || 0;
   const timeBankPercentage = gameState ? (timeBank / gameState.startingTimeBank) * 100 : 0;
   
+  // Track last round's max hold time
+  const [prevRoundMaxTime, setPrevRoundMaxTime] = useState<number | null>(null);
+  
+  useEffect(() => {
+    if (gameState?.currentRound && gameState.currentRound > 1) {
+      setPrevRoundMaxTime(gameState.maxHoldTimeLastRound);
+    }
+  }, [gameState?.currentRound, gameState?.maxHoldTimeLastRound]);
+
+  // Disable buzzer if player has already bid this round
+  const canPressBuzzer = !currentPlayer?.hasBidThisRound;
+
   if (!user || !gameId) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -294,11 +267,18 @@ function Game() {
       <div className="flex-1 flex flex-col">
         {/* Game Info */}
         <div className="bg-neutral-lighter p-4 border-b border-neutral-light">
-          <div className="flex justify-between items-center mb-2">
-            <div className="text-sm text-neutral">
-              Round <span className="font-semibold">{gameState.currentRound}</span> of{" "}
-              <span>{gameState.totalRounds}</span>
+          {/* Prominent Round Display */}
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <div className="text-3xl font-extrabold bg-primary text-white p-2 px-4 rounded-full">
+              ROUND {gameState.currentRound}/{gameState.totalRounds}
             </div>
+            {prevRoundMaxTime && (
+              <div className="text-lg font-medium">
+                Last round max: {prevRoundMaxTime.toFixed(1)}s
+              </div>
+            )}
+          </div>
+          <div className="flex justify-between items-center mb-2">
             <div className="flex items-center space-x-1 text-sm text-neutral">
               <span className="material-icons text-sm">people</span>
               <span>{gameState.players.filter(p => !p.isEliminated).length}</span> players
@@ -321,16 +301,13 @@ function Game() {
           
           {/* Buzzer Area */}
           <div className="relative">
-            {buzzerActive && (
-              <div className="absolute -top-14 left-1/2 transform -translate-x-1/2 bg-accent text-white py-1 px-4 rounded-full text-xl font-bold">
-                {commonTime}
-              </div>
-            )}
-            <Buzzer 
+            {/* The conditional rendering of commonTime here was likely causing Buzzer to remount */}
+            <Buzzer
               active={buzzerActive}
               onHold={handleBuzzerDown}
               onRelease={handleBuzzerUp}
-              disabled={!gameState || gameState.status !== 'in_progress' || (currentPlayer?.isEliminated || false)}
+              disabled={!gameState || gameState.status !== 'in_progress' ||
+                (currentPlayer?.isEliminated || false) || !canPressBuzzer}
               timeBank={timeBank}
             />
           </div>
@@ -373,7 +350,33 @@ function Game() {
       </div>
       
       {/* Game Starting Overlay */}
-      {gameState.countdown !== null && (
+      {/* Show game end screen when completed */}
+      {gameState.status === 'completed' && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-white p-8 rounded-2xl max-w-md w-full text-center">
+            <h2 className="text-3xl font-bold mb-4">Game Over!</h2>
+            <div className="space-y-2 mb-6">
+              {gameState.players.map(p => (
+                <div key={p.id} className={cn(
+                  "flex justify-between p-2 rounded",
+                  p.id === user?.id ? "bg-primary-50" : "bg-neutral-50"
+                )}>
+                  <span>{p.displayName}</span>
+                  <span className="font-bold">{p.tokensWon} 🪙</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => navigate("/")}
+              className="bg-primary hover:bg-primary-dark text-white font-bold py-2 px-6 rounded-full"
+            >
+              Return to Home
+            </button>
+          </div>
+        </div>
+      )}
+
+      {gameState.countdown !== null && gameState.status !== 'completed' && (
         <GameStartingOverlay countdown={gameState.countdown} />
       )}
     </>

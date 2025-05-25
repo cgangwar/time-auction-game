@@ -16,9 +16,14 @@ import {
   type InsertRoundBid,
   type ClientGame,
   type ClientPlayer,
+  type BotProfileType, // Import BotProfileType
 } from "@shared/schema";
 
 export interface IStorage {
+  clearAllGames(): Promise<void>;
+  clearAllUsers(): Promise<void>;
+  // Game operations
+  updateGameHost(gameId: number, hostId: number): Promise<void>;
   // User operations
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -31,6 +36,7 @@ export interface IStorage {
   getGameByCode(code: string): Promise<Game | undefined>;
   updateGameStatus(id: number, status: "waiting" | "in_progress" | "completed"): Promise<void>;
   updateGameCurrentRound(id: number, roundNumber: number): Promise<void>;
+  updateGameRoundResults(id: number, results: { roundWinnerId: number | null; maxHoldTimeLastRound: number; currentRound: number }): Promise<void>;
   setGameStartTime(id: number): Promise<void>;
   setGameEndTime(id: number): Promise<void>;
   getPublicGames(): Promise<Game[]>;
@@ -44,6 +50,7 @@ export interface IStorage {
   updateParticipantHostStatus(gameId: number, userId: number, isHost: boolean): Promise<void>;
   updateParticipantTimeBank(gameId: number, userId: number, timeBank: number): Promise<void>;
   updateParticipantTokens(gameId: number, userId: number, tokens: number): Promise<void>;
+  updateParticipantBidDetails(gameId: number, userId: number, bidDetails: { hasBidThisRound: boolean; lastHoldTime: number }): Promise<void>;
   eliminateParticipant(gameId: number, userId: number): Promise<void>;
 
   // Game round operations
@@ -83,53 +90,7 @@ export class MemStorage implements IStorage {
     this.roundIdCounter = 1;
     this.bidIdCounter = 1;
     
-    // Add a test user for development
-    const testUser = {
-      id: 1,
-      username: 'testuser',
-      displayName: 'Test User',
-      email: null,
-      password: null, // No password needed with new simplified login
-      createdAt: new Date()
-    };
-    this.users.set(1, testUser);
-    
-    // Create a test game
-    const testGame = {
-      id: 1,
-      code: 'TESTGAME',
-      createdById: 1,
-      status: 'waiting' as const,
-      currentRound: 0,
-      totalRounds: 18,
-      startingTimeBank: 600,
-      isPublic: true,
-      hasBots: false,
-      botCount: 0,
-      botProfiles: [],
-      createdAt: new Date(),
-      startedAt: null,
-      endedAt: null
-    };
-    this.games.set(1, testGame);
-    
-    // Add the creator as a participant and host
-    const testParticipant = {
-      id: 1,
-      gameId: 1,
-      userId: 1,
-      isHost: true,
-      isReady: false,
-      timeBank: 600,
-      tokensWon: 0,
-      isEliminated: false,
-      isBot: false,
-      botProfile: null,
-      joinedAt: new Date()
-    };
-    this.gameParticipants.set('1-1', testParticipant);
-    
-    console.log('Added test user with ID 1 and test game with ID 1 for development');
+    // Initialize empty storage
   }
 
   // User operations
@@ -181,9 +142,11 @@ export class MemStorage implements IStorage {
       totalRounds: insertGame.totalRounds || 10,
       startingTimeBank: insertGame.startingTimeBank || 600,
       isPublic: insertGame.isPublic ?? true,
-      createdAt: now, 
-      startedAt: null, 
+      createdAt: now,
+      startedAt: null,
       endedAt: null,
+      maxHoldTimeLastRound: 0, // Added default
+      roundWinnerId: null,     // Added default
       hasBots: insertGame.hasBots || false,
       botCount: insertGame.botCount || 0,
       botProfiles: insertGame.botProfiles || []
@@ -213,6 +176,18 @@ export class MemStorage implements IStorage {
     const game = this.games.get(id);
     if (game) {
       this.games.set(id, { ...game, currentRound: roundNumber });
+    }
+  }
+
+  async updateGameRoundResults(id: number, results: { roundWinnerId: number | null; maxHoldTimeLastRound: number; currentRound: number }): Promise<void> {
+    const game = this.games.get(id);
+    if (game) {
+      this.games.set(id, {
+        ...game,
+        roundWinnerId: results.roundWinnerId,
+        maxHoldTimeLastRound: results.maxHoldTimeLastRound,
+        currentRound: results.currentRound
+      });
     }
   }
 
@@ -247,7 +222,7 @@ export class MemStorage implements IStorage {
     // Map games to client format
     const clientGames: ClientGame[] = [];
     
-    for (const gameId of gameIds) {
+    for (const gameId of Array.from(gameIds)) { // Converted Set to Array for iteration
       const game = this.games.get(gameId);
       if (!game) continue;
       
@@ -278,7 +253,11 @@ export class MemStorage implements IStorage {
           isReady: p.isReady,
           timeBank: p.timeBank || game.startingTimeBank,
           tokensWon: p.tokensWon,
-          isEliminated: p.isEliminated
+          isEliminated: p.isEliminated,
+          isBot: p.isBot,
+          botProfile: p.botProfile as BotProfileType | undefined, // Ensure correct type
+          hasBidThisRound: p.hasBidThisRound,
+          lastHoldTime: p.lastHoldTime
         };
       });
       
@@ -307,9 +286,19 @@ export class MemStorage implements IStorage {
     const now = new Date();
     
     const participant: GameParticipant = {
-      ...insertParticipant,
       id,
-      joinedAt: now
+      gameId: insertParticipant.gameId,
+      userId: insertParticipant.userId,
+      isHost: insertParticipant.isHost || false,
+      isReady: insertParticipant.isReady || false,
+      timeBank: insertParticipant.timeBank === undefined ? (this.games.get(insertParticipant.gameId)?.startingTimeBank || 0) : insertParticipant.timeBank,
+      tokensWon: insertParticipant.tokensWon || 0,
+      isEliminated: insertParticipant.isEliminated || false,
+      isBot: insertParticipant.isBot || false,
+      botProfile: insertParticipant.botProfile || null,
+      joinedAt: now,
+      hasBidThisRound: false, // Default for new participant
+      lastHoldTime: 0         // Default for new participant
     };
     
     const key = `${participant.gameId}-${participant.userId}`;
@@ -365,12 +354,40 @@ export class MemStorage implements IStorage {
     }
   }
 
+  async updateGameHost(gameId: number, hostId: number): Promise<void> {
+    const game = this.games.get(gameId);
+    if (game) {
+      this.games.set(gameId, { ...game, createdById: hostId });
+    }
+  }
+
+  async clearAllGames(): Promise<void> {
+    if (this.games) this.games.clear();
+    if (this.participants) this.participants.clear();
+    if (this.rounds) this.rounds.clear();
+  }
+
+  async clearAllUsers(): Promise<void> {
+    if (this.users) this.users.clear();
+  }
+
   async eliminateParticipant(gameId: number, userId: number): Promise<void> {
     const key = `${gameId}-${userId}`;
     const participant = this.gameParticipants.get(key);
     
     if (participant) {
       this.gameParticipants.set(key, { ...participant, isEliminated: true });
+    }
+  }
+async updateParticipantBidDetails(gameId: number, userId: number, bidDetails: { hasBidThisRound: boolean; lastHoldTime: number }): Promise<void> {
+    const key = `${gameId}-${userId}`;
+    const participant = this.gameParticipants.get(key);
+    if (participant) {
+      this.gameParticipants.set(key, {
+        ...participant,
+        hasBidThisRound: bidDetails.hasBidThisRound,
+        lastHoldTime: bidDetails.lastHoldTime,
+      });
     }
   }
 
@@ -380,8 +397,10 @@ export class MemStorage implements IStorage {
     const now = new Date();
     
     const round: GameRound = {
-      ...insertRound,
       id,
+      gameId: insertRound.gameId,
+      roundNumber: insertRound.roundNumber,
+      winnerId: insertRound.winnerId === undefined ? null : insertRound.winnerId, // Ensure null if undefined
       startedAt: now,
       endedAt: null
     };

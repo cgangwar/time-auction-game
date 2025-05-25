@@ -4,10 +4,11 @@ import { storage } from "./storage";
 import { WebSocketServer, WebSocket } from "ws";
 import { z } from "zod";
 import { 
-  insertUserSchema, 
-  insertGameSchema, 
+  insertUserSchema,
+  insertGameSchema,
   insertGameParticipantSchema,
-  type GameEvent
+  type GameEvent,
+  type BotProfileType
 } from "@shared/schema";
 import crypto from "crypto";
 import { addBotsToGame, processBotActions } from "./bots";
@@ -221,22 +222,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
         
-        console.log(`Adding user ${userId} as participant to game ${gameId}, isHost: ${isCreator}`);
+        // Only set as host if they're the creator AND there isn't already a host
+        const currentHost = (await storage.getParticipantsByGame(gameId)).find(p => p.isHost);
+        const shouldBeHost = isCreator && !currentHost;
+        
+        console.log(`handleJoinGame: User ${userId}, isCreator: ${isCreator}, currentHost: ${currentHost?.userId}, shouldBeHost: ${shouldBeHost}`);
+        
+        console.log(`Adding user ${userId} as participant to game ${gameId}, isHost: ${shouldBeHost}`);
         participant = await storage.addParticipant({
           gameId,
           userId,
-          isHost: isCreator, // Set as host if they created the game
-          isReady: false,
+          isHost: shouldBeHost,
+          isReady: shouldBeHost, // Set isReady to true if the participant is the host
           timeBank: game.startingTimeBank,
           tokensWon: 0,
           isEliminated: false,
-          isBot: false // Human player
+          isBot: false
         });
+
+        console.log(`handleJoinGame: Participant added/updated. userId: ${participant.userId}, isHost: ${participant.isHost}, isReady: ${participant.isReady}`);
+
+        if (shouldBeHost) {
+          await storage.updateGameHost(gameId, userId);
+        }
       } else if (isCreator && !participant.isHost) {
-        // If they're the creator but not marked as host yet, update them
-        console.log(`Updating host status for user ${userId} in game ${gameId}`);
-        await storage.updateParticipantHostStatus(gameId, userId, true);
+        // If they're the creator but not marked as host, and no other host exists
+        const currentHost = (await storage.getParticipantsByGame(gameId)).find(p => p.isHost);
+        if (!currentHost) {
+          console.log(`Updating host status for user ${userId} in game ${gameId}`);
+          await storage.updateParticipantHostStatus(gameId, userId, true);
+          await storage.updateGameHost(gameId, userId);
+          // After updating host status, ensure isReady is also true if they are now the host
+          participant = await storage.getParticipant(gameId, userId); // Re-fetch participant to get updated status
+          if (participant && !participant.isReady) {
+             await storage.updateParticipantReadyStatus(gameId, userId, true);
+             console.log(`handleJoinGame: Updated isReady to true for new host ${userId}`);
+          }
+        }
       }
+      
+      // Re-fetch participant after any potential updates to log the final state
+      const finalParticipantState = await storage.getParticipant(gameId, userId);
+      console.log(`handleJoinGame: Final participant state for userId ${userId}: isHost: ${finalParticipantState?.isHost}, isReady: ${finalParticipantState?.isReady}`);
+
     } catch (error) {
       console.error(`Error in handleJoinGame:`, error);
       socket.send(JSON.stringify({ type: 'ERROR', message: 'Internal server error' }));
@@ -271,6 +299,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Send game state to connected user
   async function sendGameState(gameId: number, userId: number, socket: WebSocket) {
+    console.log(`sendGameState called for gameId: ${gameId}, userId: ${userId}`);
     try {
       const game = await storage.getGame(gameId);
       if (!game) {
@@ -285,11 +314,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Found ${participants.length} participants for game ${gameId}`);
       
       // Debug participant information
-      console.log('Participants:', participants.map(p => ({
-        userId: p.userId, 
-        isHost: p.isHost,
-        isBot: p.isBot
-      })));
+      // console.log('Participants:', participants.map(p => ({
+      //   userId: p.userId,
+      //   isHost: p.isHost,
+      //   isBot: p.isBot
+      // })));
       
       // Filter out any invalid participants (userId of 0 or undefined/null)
       const validParticipants = participants.filter(p => p.userId && p.userId > 0);
@@ -311,6 +340,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       
       // Build player list with all required information for the client
+      // Ensure only one host is marked per game
+      const hostId = game.createdById;
       const clientPlayers = validParticipants.map(p => {
         const user = playerDetails.find(pd => pd.userId === p.userId);
         return {
@@ -318,19 +349,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           username: user?.username || '',
           displayName: user?.displayName || '',
           initials: user?.displayName ? user.displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase() : '??',
-          isHost: p.isHost,
+          isHost: p.userId === hostId, // Use game.createdById as source of truth
           isReady: p.isReady,
           timeBank: p.timeBank || game.startingTimeBank,
           tokensWon: p.tokensWon,
           isEliminated: p.isEliminated,
           isBot: p.isBot || false,
-          botProfile: p.botProfile
+          botProfile: p.botProfile && ['aggressive', 'conservative', 'erratic'].includes(p.botProfile) ? p.botProfile as BotProfileType : undefined,
+          hasBidThisRound: p.hasBidThisRound,
+          lastHoldTime: p.lastHoldTime,
         };
       });
   
-      console.log('Sending game state to player:', { gameId, playerId: userId, playerCount: clientPlayers.length });
+      // console.log('Sending game state to player:', { gameId, playerId: userId, playerCount: clientPlayers.length });
       
-      const gameState = {
+      const gameStateMessage: GameEvent = {
         type: 'GAME_STATE',
         gameId,
         code: game.code,
@@ -340,12 +373,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startingTimeBank: game.startingTimeBank,
         isPublic: game.isPublic,
         players: clientPlayers,
+        maxHoldTimeLastRound: game.maxHoldTimeLastRound,
+        roundWinnerId: game.roundWinnerId,
         hasBots: game.hasBots,
-        botCount: game.botCount,
-        botProfiles: game.botProfiles
+        botCount: game.botCount === null ? undefined : game.botCount,
+        botProfiles: game.botProfiles === null ? undefined : game.botProfiles as BotProfileType[] | undefined
       };
       
-      socket.send(JSON.stringify(gameState));
+      console.log(`sendGameState: Sending GAME_STATE to userId: ${userId} in gameId: ${gameId}. Players:`, clientPlayers.map(p => ({ id: p.id, isReady: p.isReady, isHost: p.isHost })));
+      socket.send(JSON.stringify(gameStateMessage));
       console.log('Game state sent successfully');
     } catch (error) {
       console.error('Error sending game state:', error);
@@ -355,9 +391,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Handle player ready state changes
   async function handlePlayerReady(gameId: number, userId: number, isReady: boolean) {
+    console.log(`handlePlayerReady called for gameId: ${gameId}, userId: ${userId}, isReady: ${isReady}`);
     await storage.updateParticipantReadyStatus(gameId, userId, isReady);
     
     // Broadcast to all players in the game
+    console.log(`Broadcasting PLAYER_READY for gameId: ${gameId}, userId: ${userId}, isReady: ${isReady}`);
     broadcastToGame(gameId, {
       type: 'PLAYER_READY',
       gameId,
@@ -396,24 +434,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function handleBuzzerRelease(gameId: number, userId: number, holdTime: number) {
     const timestamp = Date.now();
     
-    // Get the game and current round
     const game = await storage.getGame(gameId);
     if (!game || game.status !== 'in_progress') {
+      console.log(`Game ${gameId} not in progress or not found, cannot process buzzer release.`);
       return;
     }
     
-    // Get the participant to update their time bank
-    const participant = await storage.getParticipant(gameId, userId);
-    if (participant && participant.timeBank !== null) {
-      // Convert hold time from ms to seconds for calculation
-      const holdTimeSeconds = holdTime / 1000;
-      const newTimeBank = Math.max(0, participant.timeBank - holdTimeSeconds);
-      
-      // Update participant's time bank
-      await storage.updateParticipantTimeBank(gameId, userId, newTimeBank);
+    let participant = await storage.getParticipant(gameId, userId);
+    if (!participant || participant.isEliminated) {
+      console.log(`Participant ${userId} in game ${gameId} not found or is eliminated.`);
+      return;
+    }
+
+    if (participant.hasBidThisRound) {
+      console.log(`Participant ${userId} in game ${gameId} has already bid this round.`);
+      // Optionally send an error or ignore, for now, ignore.
+      return;
     }
     
-    // Broadcast to all players in the game
+    // Update participant's time bank
+    if (participant.timeBank !== null) {
+      const holdTimeSeconds = holdTime / 1000;
+      const newTimeBank = Math.max(0, participant.timeBank - holdTimeSeconds);
+      await storage.updateParticipantTimeBank(gameId, userId, newTimeBank);
+    }
+
+    // Update participant's bid details for the round
+    // This assumes storage.updateParticipantBidDetails exists or similar functionality
+    await storage.updateParticipantBidDetails(gameId, userId, {
+      hasBidThisRound: true,
+      lastHoldTime: holdTime
+    });
+    
+    // Broadcast buzzer release to all players
     broadcastToGame(gameId, {
       type: 'BUZZER_RELEASE',
       gameId,
@@ -422,29 +475,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       holdTime
     });
     
-    // Find rounds for this game
-    const rounds = await storage.getGameRounds(gameId);
-    const currentRound = rounds.find(r => r.roundNumber === game.currentRound);
+    // Refresh participants data before checking bids
+    const freshParticipants = await storage.getParticipantsByGame(gameId);
+    const activePlayers = freshParticipants.filter(p => !p.isEliminated);
+    const playersWhoHaveBid = freshParticipants.filter(p => p.hasBidThisRound);
     
-    if (currentRound) {
-      // Create a bid for this round
-      await storage.createBid({
-        roundId: currentRound.id,
-        userId,
-        bidTime: holdTime
-      });
-      
-      // Check if this is the first release (meaning everyone has released)
-      const participants = await storage.getParticipantsByGame(gameId);
-      const activePlayers = participants.filter(p => !p.isEliminated);
-      
-      // Get all bids for this round
-      const bids = await storage.getBidsByRound(currentRound.id);
-      
-      // If we have a bid from each active player, end the round
-      if (bids.length === activePlayers.length) {
-        await endRound(gameId, currentRound.id);
-      }
+    console.log(`Game ${gameId}: Active players:`, activePlayers.map(p => p.userId));
+    console.log(`Game ${gameId}: Players who have bid:`, playersWhoHaveBid.map(p => p.userId));
+
+    const allActivePlayersHaveBid = activePlayers.length > 0 &&
+      activePlayers.every(p => playersWhoHaveBid.some(b => b.userId === p.userId));
+
+    if (allActivePlayersHaveBid) {
+      console.log(`All active players in game ${gameId} have bid. Ending round.`);
+      await endCurrentRound(gameId);
+    } else {
+      console.log(`Game ${gameId}: Waiting for ${activePlayers.length - playersWhoHaveBid.length} more players to bid`);
     }
   }
   
@@ -502,77 +548,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   
   // End the current round
-  async function endRound(gameId: number, roundId: number) {
-    const round = await storage.getRound(roundId);
-    const game = await storage.getGame(gameId);
-    
-    if (!round || !game) {
+  async function endCurrentRound(gameId: number) {
+    let game = await storage.getGame(gameId);
+    if (!game || game.status !== 'in_progress') {
+      console.log(`Game ${gameId} not in progress or not found, cannot end round.`);
       return;
     }
-    
-    // Get all bids for this round
-    const bids = await storage.getBidsByRound(roundId);
-    
-    // Find the highest bid
-    let highestBid: { userId: number, bidTime: number } | null = null;
-    
-    for (const bid of bids) {
-      if (!highestBid || bid.bidTime > highestBid.bidTime) {
-        highestBid = { userId: bid.userId, bidTime: bid.bidTime };
-      }
+
+    const participants = await storage.getParticipantsByGame(gameId);
+    const activeBidders = participants.filter(p => !p.isEliminated && p.hasBidThisRound);
+
+    let roundWinner: (typeof participants[0]) | null = null;
+    let maxHoldTimeThisRound = 0;
+
+    if (activeBidders.length > 0) {
+      roundWinner = activeBidders.reduce((prev, current) =>
+        (prev.lastHoldTime > current.lastHoldTime) ? prev : current
+      );
+      maxHoldTimeThisRound = roundWinner.lastHoldTime;
+      
+      // Award token to winner
+      await storage.updateParticipantTokens(gameId, roundWinner.id, roundWinner.tokensWon + 1);
+      console.log(`Round ${game.currentRound} winner in game ${gameId}: User ${roundWinner.id} with hold time ${maxHoldTimeThisRound}`);
+    } else {
+      console.log(`No active bidders in game ${gameId} for round ${game.currentRound}. No winner.`);
+      // No winner if no one bid or all who bid were eliminated mid-round (edge case)
     }
+
+    // Update game state with round results
+    await storage.updateGameRoundResults(gameId, {
+      roundWinnerId: roundWinner ? roundWinner.id : null,
+      maxHoldTimeLastRound: maxHoldTimeThisRound,
+      currentRound: game.currentRound + 1 // Increment round number
+    });
     
-    if (highestBid) {
-      // Complete the round with the winner
-      await storage.completeRound(roundId, highestBid.userId);
-      
-      // Update winner's token count
-      const participant = await storage.getParticipant(gameId, highestBid.userId);
-      if (participant) {
-        await storage.updateParticipantTokens(
-          gameId, 
-          highestBid.userId, 
-          participant.tokensWon + 1
-        );
-      }
-      
-      // Check if this was the last round
-      const nextRound = round.roundNumber + 1;
-      const isLastRound = nextRound > game.totalRounds;
-      
-      // Broadcast round end
-      broadcastToGame(gameId, {
-        type: 'ROUND_END',
-        gameId,
-        roundNumber: round.roundNumber,
-        winnerId: highestBid.userId,
-        winnerHoldTime: highestBid.bidTime,
-        nextRound: isLastRound ? -1 : nextRound
+    // Reset bid status for all participants for the next round
+    for (const p of participants) {
+      await storage.updateParticipantBidDetails(gameId, p.id, {
+        hasBidThisRound: false,
+        lastHoldTime: 0
       });
-      
-      if (isLastRound) {
-        // This was the last round, end the game
-        await endGame(gameId);
-      } else {
-        // Update game current round
-        await storage.updateGameCurrentRound(gameId, nextRound);
-        
-        // Create next round
-        await storage.createRound({
+    }
+
+    // Fetch the updated game state after updates
+    game = await storage.getGame(gameId);
+    if (!game) return; // Should not happen
+
+    const nextRoundNumber = game.currentRound; // This is now the *next* round number
+    const isLastRoundCompleted = (nextRoundNumber -1) >= game.totalRounds;
+
+
+    // Broadcast ROUND_END event
+    broadcastToGame(gameId, {
+      type: 'ROUND_END',
+      gameId,
+      roundNumber: nextRoundNumber - 1, // The round that just ended
+      winnerId: roundWinner ? roundWinner.id : 0, // Use 0 or null for no winner
+      winnerHoldTime: maxHoldTimeThisRound,
+      nextRound: isLastRoundCompleted ? -1 : nextRoundNumber
+    });
+
+    if (isLastRoundCompleted) {
+      console.log(`Game ${gameId} completed after round ${nextRoundNumber - 1}.`);
+      await endGame(gameId);
+    } else {
+      console.log(`Game ${gameId} advancing to round ${nextRoundNumber}.`);
+      // Start next round after a delay
+      setTimeout(() => {
+        broadcastToGame(gameId, {
+          type: 'ROUND_START',
           gameId,
-          roundNumber: nextRound,
-          winnerId: null
+          roundNumber: nextRoundNumber
         });
-        
-        // Start next round after a delay
-        setTimeout(() => {
-          broadcastToGame(gameId, {
-            type: 'ROUND_START',
-            gameId,
-            roundNumber: nextRound
-          });
-        }, 5000); // 5 second delay between rounds
-      }
+        // Potentially trigger bot actions for the new round here if needed
+        // processBotActions(gameId);
+      }, 3000); // 3-second delay between rounds
     }
   }
   
@@ -608,7 +658,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           username: user?.username || '',
           displayName: user?.displayName || '',
           tokens: p.tokensWon,
-          timeRemaining: p.timeBank
+          timeRemaining: p.timeBank === null ? 0 : p.timeBank // Ensure timeRemaining is a number
         };
       })
     );
@@ -630,7 +680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   
   // Helper to broadcast a message to all clients in a game
-  function broadcastToGame(gameId: number, message: GameEvent) {
+  async function broadcastToGame(gameId: number, message: GameEvent) { // Made async to allow await sendGameState
     const clients = gameClients.get(gameId);
     if (!clients) return;
     
@@ -649,9 +699,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
     
     // If no players are connected to this game, check if we should clean it up
-    if (connectedPlayers === 0 && message.type !== 'GAME_CANCELLED') {
-      console.log(`No players connected to game ${gameId}, checking if cleanup needed`);
-      handleEmptyGame(gameId);
+    // Also, if the message is GAME_STATE, we don't need to check for empty game cleanup here
+    // as sendGameState is usually targeted or part of a broader update.
+    if (message.type !== 'GAME_STATE' && connectedPlayers === 0 && message.type !== 'GAME_CANCELLED') {
+      console.log(`No players connected to game ${gameId} during broadcast of ${message.type}, checking if cleanup needed`);
+      await handleEmptyGame(gameId);
+    }
+
+    // If the game state changed significantly (e.g. ROUND_END), resend full game state to all.
+    if (message.type === 'ROUND_END' || message.type === 'GAME_START' || message.type === 'PLAYER_LEFT') {
+        console.log(`Broadcasting full game state after ${message.type} for game ${gameId}`);
+        clients?.forEach(async (socket, userId) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                await sendGameState(gameId, userId, socket);
+            }
+        });
     }
   }
   
@@ -825,21 +887,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentRound: 0
       });
       
-      // Add the creator as the first participant and host - set them as ready by default
+      // Add the creator as the first participant and host
       const participant = await storage.addParticipant({
         gameId: game.id,
-        userId: validatedData.createdById, // Use createdById instead of hostId
+        userId: validatedData.createdById,
         isHost: true,
-        isReady: true, // Host is ready by default to streamline gameplay
+        isReady: false, // Host needs to explicitly mark themselves ready
         timeBank: validatedData.startingTimeBank,
         tokensWon: 0,
         isEliminated: false,
         isBot: false
       });
+
+      // Update the game to set the creator as host
+      await storage.updateGameHost(game.id, validatedData.createdById);
       
       // If bots are requested, add them
       if (validatedData.hasBots && validatedData.botCount && validatedData.botCount > 0) {
-        await addBotsToGame(game.id, validatedData.botCount, validatedData.botProfiles, validatedData.startingTimeBank);
+        await addBotsToGame(game.id, validatedData.createdById, validatedData.botCount, validatedData.botProfiles);
       }
       
       res.status(201).json(game);
@@ -1023,7 +1088,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       
       for (const game of inProgressGamesWithBots) {
-        await processBotActions(game.id);
+        // Bot actions will be handled differently, likely per round or event
       }
     } catch (error) {
       console.error('Error processing bot actions:', error);

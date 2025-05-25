@@ -1,9 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface BuzzerProps {
   active: boolean;
   onHold: () => void;
-  onRelease: () => void;
+  onRelease: (holdTime: number) => void;
+  disabled?: boolean;
+  timeBank?: number;
+}
+
+interface BuzzerProps {
+  active: boolean;
+  onHold: () => void;
+  onRelease: (holdTime: number) => void; // Updated to accept holdTime
   disabled?: boolean;
   timeBank?: number;
 }
@@ -15,6 +23,12 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
   const [displayTime, setDisplayTime] = useState('00:00.0');
   const startTimeRef = useRef<number | null>(null);
   const animationRef = useRef<number | null>(null);
+  const onReleaseRef = useRef(onRelease); // Ref to hold the latest onRelease callback
+
+  // Keep onReleaseRef updated with the latest onRelease prop
+  useEffect(() => {
+    onReleaseRef.current = onRelease;
+  }, [onRelease]);
 
   // Sync the local active state with the prop
   // Only update local state from props when props change from inactive to active
@@ -52,7 +66,7 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
       const finalHoldTime = holdTime > 0 ? holdTime : 0;
       stopTimer();
       setLocalActive(false);
-      onRelease();
+      onRelease(finalHoldTime);
     }
   };
 
@@ -62,7 +76,7 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
       const finalHoldTime = holdTime > 0 ? holdTime : 0;
       stopTimer();
       setLocalActive(false);
-      onRelease();
+      onRelease(finalHoldTime);
     }
   };
 
@@ -93,12 +107,23 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
       const finalHoldTime = holdTime > 0 ? holdTime : 0;
       stopTimer();
       setLocalActive(false);
-      onRelease();
+      onRelease(finalHoldTime);
     }
   };
 
   // Timer functions
-  const startTimer = () => {
+  const stopTimer = useCallback(() => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    startTimeRef.current = null;
+    setHoldTime(0);
+    setDisplayTime('00:00.0');
+    setLocalActive(false); // Ensure local state is consistent
+  }, []); // Stable: depends only on setters from useState
+
+  const startTimer = useCallback(() => {
     if (!startTimeRef.current) {
       startTimeRef.current = Date.now();
     }
@@ -107,58 +132,55 @@ function Buzzer({ active, onHold, onRelease, disabled = false, timeBank = 0 }: B
       if (startTimeRef.current) {
         const elapsed = Date.now() - startTimeRef.current;
         const seconds = elapsed / 1000;
-        
-        // Format time as SS.SS
         const formattedTime = seconds.toFixed(1) + "s";
         
         setHoldTime(elapsed);
         setDisplayTime(formattedTime);
         
-        // Calculate remaining time bank
         const remainingTimeBank = Math.max(0, timeBank - seconds);
-        const remainingMins = Math.floor(remainingTimeBank / 60);
-        const remainingSecs = remainingTimeBank % 60;
-        const remainingDisplay = `${remainingMins}:${remainingSecs.toFixed(1).padStart(4, '0')}`;
-        
-        // Update the remaining time display
         const timeBankEl = document.getElementById('player-timebank');
         if (timeBankEl) {
-          timeBankEl.textContent = remainingDisplay;
+          const remainingMins = Math.floor(remainingTimeBank / 60);
+          const remainingSecs = remainingTimeBank % 60;
+          timeBankEl.textContent = `${remainingMins}:${remainingSecs.toFixed(1).padStart(4, '0')}`;
         }
         
-        // Continue the animation frame loop
         animationRef.current = requestAnimationFrame(updateTimer);
       }
     };
-    
-    // Start the animation loop immediately
     updateTimer();
-  };
+  }, [timeBank]); // timeBank is a prop, include if it can change during hold
 
-  const stopTimer = () => {
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-      animationRef.current = null;
+  // Effect to handle external deactivation by `active` prop (from parent)
+  useEffect(() => {
+    // If the parent tells us to be inactive, and we locally think we are active
+    if (!active && localActive) {
+      console.log('Buzzer: active prop turned false. Stopping timer and calling onRelease.');
+      stopTimer();
+      // setLocalActive(false); // stopTimer now handles this
+      onReleaseRef.current(0); // Call latest onRelease with 0 hold time
     }
-    startTimeRef.current = null;
-    setHoldTime(0);
-    setDisplayTime('00:00.0');
-  };
+  }, [active, localActive, stopTimer]);
 
-  // Cleanup on component unmount
+  // Effect for actual component unmount cleanup
   useEffect(() => {
     return () => {
-      if (animationRef.current) {
+      console.log('Buzzer: Component unmounted. Cleaning up animation frame.');
+      if (animationRef.current) { // If animation was running
         cancelAnimationFrame(animationRef.current);
-      }
-      if (active) {
-        onRelease();
+        animationRef.current = null;
+        // If timer was running when unmounted (e.g. user navigated away while holding)
+        if (startTimeRef.current) {
+          console.log('Buzzer: Unmounted while timer was active. Calling latest onRelease.');
+          const elapsed = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
+          onReleaseRef.current(elapsed); // Call the latest onRelease with elapsed time
+        }
       }
     };
-  }, [active, onRelease]);
+  }, []); // Empty dependency array: runs only on mount, cleans up only on unmount.
 
   return (
-    <div 
+    <div
       className={`w-56 h-56 rounded-full bg-primary flex flex-col items-center justify-center shadow-lg transition-all duration-200 ${localActive ? 'bg-secondary buzzer-active' : 'buzzer-shadow'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}

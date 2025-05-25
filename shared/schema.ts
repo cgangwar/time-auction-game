@@ -1,4 +1,47 @@
 import { pgTable, text, serial, integer, timestamp, boolean, pgEnum } from "drizzle-orm/pg-core";
+
+export interface GameState {
+  id: number;
+  code: string;
+  createdById: number;
+  status: 'waiting' | 'in_progress' | 'completed';
+  currentRound: number;
+  totalRounds: number;
+  startingTimeBank: number;
+  isPublic: boolean;
+  hasBots: boolean;
+  botCount?: number;
+  botProfiles?: string[];
+  createdAt: Date;
+  startedAt?: Date;
+  endedAt?: Date;
+  maxHoldTimeLastRound: number | null;
+  roundWinnerId?: number;
+  players: PlayerState[];
+  lastEvent?: GameEvent;
+  countdown?: number;
+}
+
+export interface PlayerState {
+  id: number;
+  username: string;
+  displayName: string;
+  isHost: boolean;
+  isReady: boolean;
+  timeBank: number;
+  tokensWon: number;
+  isEliminated: boolean;
+  isBot: boolean;
+  botProfile?: 'aggressive' | 'conservative' | 'erratic';
+  hasBidThisRound: boolean;
+  lastHoldTime?: number;
+}
+
+export type GameEvent = {
+  type: string;
+  gameId: number;
+  [key: string]: any;
+};
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -32,6 +75,8 @@ export const games = pgTable("games", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   startedAt: timestamp("started_at"),
   endedAt: timestamp("ended_at"),
+  maxHoldTimeLastRound: integer("max_hold_time_last_round").notNull().default(0), // Max hold time in ms for the previous round
+  roundWinnerId: integer("round_winner_id").references(() => users.id), // ID of the user who won the last round
 });
 
 export const gameParticipants = pgTable("game_participants", {
@@ -46,6 +91,8 @@ export const gameParticipants = pgTable("game_participants", {
   isBot: boolean("is_bot").notNull().default(false), // Whether this participant is an AI bot
   botProfile: text("bot_profile"), // Type of bot profile if this is a bot
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  hasBidThisRound: boolean("has_bid_this_round").notNull().default(false),
+  lastHoldTime: integer("last_hold_time").notNull().default(0), // Hold time in ms for the current round bid
 });
 
 export const gameRounds = pgTable("game_rounds", {
@@ -138,8 +185,9 @@ export type GameEvent =
   | { type: "GAME_END"; gameId: number; rankings: Array<{userId: number; username: string; displayName: string; tokens: number; timeRemaining: number}> }
   | { type: "PLAYER_LEFT"; gameId: number; userId: number }
   | { type: "GAME_CANCELLED"; gameId: number; reason: string }
-  | { type: "GAME_STATE"; gameId: number; code: string; status: string; currentRound: number; 
+  | { type: "GAME_STATE"; gameId: number; code: string; status: string; currentRound: number;
       totalRounds: number; startingTimeBank: number; isPublic: boolean; players: ClientPlayer[];
+      maxHoldTimeLastRound: number; roundWinnerId: number | null;
       hasBots?: boolean; botCount?: number; botProfiles?: BotProfileType[] }
   | { type: "ERROR"; message: string };
 
@@ -158,6 +206,8 @@ export type ClientPlayer = {
   isEliminated: boolean;
   isBot?: boolean;
   botProfile?: BotProfileType;
+  hasBidThisRound: boolean;
+  lastHoldTime: number;
 };
 
 export type ClientGame = {
